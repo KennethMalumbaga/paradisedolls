@@ -38,6 +38,15 @@ class ChaturbateCourseSeeder extends Seeder
             ]
         );
 
+        // Remove all existing modules (and their lessons/blocks) so re-running gives exactly the right count
+        foreach ($course->modules as $oldModule) {
+            foreach ($oldModule->lessons as $oldLesson) {
+                $oldLesson->contentBlocks()->delete();
+            }
+            $oldModule->lessons()->delete();
+        }
+        $course->modules()->delete();
+
         $modules = [
 
             // (1) Introduction

@@ -46,7 +46,42 @@ class BabestationCourseSeeder extends Seeder
             ]
         );
 
+        // Remove all existing modules (and their lessons/blocks) so re-running gives exactly the right count
+        foreach ($course->modules as $oldModule) {
+            foreach ($oldModule->lessons as $oldLesson) {
+                $oldLesson->contentBlocks()->delete();
+            }
+            $oldModule->lessons()->delete();
+        }
+        $course->modules()->delete();
+
         $modules = [
+
+            // (1) Introduction
+            [
+                'title'       => 'Introduction',
+                'description' => 'A welcome introduction to Babestation and what you can expect from this course.',
+                'lessons'     => [
+                    [
+                        'title'      => 'Introduction',
+                        'intro_only' => true,
+                        'overview'   => 'Welcome to the Babestation Boss Doll Blueprint. This course walks you through the full Babestation Cams platform — from your very first login all the way through to managing your profile, configuring your shows, tracking your earnings, and going live with confidence. Babestation is a premium UK-based cam platform where clients come specifically to spend money on one-on-one private interaction. Follow this course step by step and you will have everything you need to start earning like a Boss Doll.',
+                        'steps'      => implode("\n", [
+                            'Watch the full introduction before moving on to the next module',
+                            'Note that your dedicated support team is available for real-time help throughout your journey',
+                            'Understand that Babestation is a premium pay-per-minute platform — clients pay per minute in Group or Private shows',
+                            'Your account is already fully set up by the Paradise Dolls team — you do not need to register again',
+                            'Work through each module in order for the best learning experience',
+                        ]),
+                        'tips'       => implode("\n", [
+                            'Babestation rewards consistency — the more regularly you go live, the better your results',
+                            'Your support team is always available — never hesitate to reach out when you need help',
+                            'Follow the course in order — each module builds on the previous one',
+                            'You are not alone in this — the Paradise Dolls community is here to support you every step of the way',
+                        ]),
+                    ],
+                ],
+            ],
 
             // (2) About Babestation
             [
