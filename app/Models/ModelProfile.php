@@ -83,6 +83,7 @@ class ModelProfile extends Model
         'verification_notes',
         'verification_request_instructions',
         'community_invited_at',
+        'community_invite_url',
         'community_role_assigned_at',
     ];
 
@@ -134,6 +135,11 @@ class ModelProfile extends Model
     public function isVerified(): bool
     {
         return $this->verification_status === self::VERIFICATION_VERIFIED;
+    }
+
+    public function canApproveVerification(): bool
+    {
+        return ! $this->isVerified() && $this->hasVerificationSubmission();
     }
 
     public function isCommunityInvited(): bool

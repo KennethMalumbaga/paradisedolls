@@ -6,6 +6,7 @@ use App\Mail\ApplicationSubmittedMail;
 use App\Models\ModelApplication;
 use App\Models\ModelReferral;
 use App\Models\User;
+use App\Support\CountryCallingCodes;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Mail;
@@ -25,24 +26,28 @@ class ApplyController extends Controller
     public function store(Request $request): RedirectResponse
     {
         $callingCodes = config('country_calling_codes', []);
+        $phonePrefixLookup = CountryCallingCodes::phonePrefixLookup($callingCodes);
 
         $validator = Validator::make($request->all(), [
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'email', 'max:255'],
-            'phone_country' => ['nullable', 'required_with:phone_number', 'string', Rule::in(array_keys($callingCodes))],
+            'phone_country' => ['nullable', 'required_with:phone_number', 'string', Rule::in(array_keys($phonePrefixLookup))],
             'phone_number' => ['nullable', 'string', 'max:32'],
             'message' => ['nullable', 'string', 'max:5000'],
             'experience_level' => ['required', 'string', 'max:64'],
             'instagram_handle' => ['nullable', 'string', 'max:255'],
             'tiktok_handle' => ['nullable', 'string', 'max:255'],
             'photos' => ['nullable', 'array', 'max:6'],
-            'photos.*' => ['image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+            'photos.*' => ['image', 'mimes:jpg,jpeg,png,webp', 'max:10240'],
             'age_confirmed' => ['accepted'],
             'referral_code' => ['nullable', 'string', 'max:32'],
         ], [
             'email.email' => __('Please enter a valid email address, like name@example.com.'),
             'phone_country.required_with' => __('Please choose a country code for your phone number.'),
             'phone_country.in' => __('Please choose a valid country code.'),
+            'photos.max' => __('Please upload up to 6 photos only.'),
+            'photos.*.max' => __('Each photo must be 10 MB or smaller.'),
+            'photos.*.mimes' => __('Photos must be JPG, PNG, or WEBP files.'),
         ]);
 
         $validator->after(function ($validator) use ($request): void {
@@ -73,7 +78,7 @@ class ApplyController extends Controller
         });
 
         $validated = $validator->validate();
-        $phone = $this->normalizePhone($validated, $callingCodes);
+        $phone = $this->normalizePhone($validated, $phonePrefixLookup);
 
         $socialHandle = implode(' / ', array_filter([
             trim((string) ($validated['instagram_handle'] ?? '')),
@@ -102,7 +107,7 @@ class ApplyController extends Controller
         return redirect()->route('home')->withFragment('apply')->with('application_sent', true);
     }
 
-    private function normalizePhone(array $validated, array $callingCodes): ?string
+    private function normalizePhone(array $validated, array $phonePrefixLookup): ?string
     {
         $phoneNumber = trim((string) ($validated['phone_number'] ?? ''));
 
@@ -110,8 +115,8 @@ class ApplyController extends Controller
             return null;
         }
 
-        $country = $validated['phone_country'] ?? 'PH';
-        $countryCode = $callingCodes[$country]['code'] ?? null;
+        $country = $validated['phone_country'] ?? 'GB';
+        $countryCode = $phonePrefixLookup[$country]['prefix'] ?? null;
 
         if (! $countryCode) {
             return null;
@@ -129,7 +134,7 @@ class ApplyController extends Controller
         }
 
         try {
-            Mail::to($email)->queue(new ApplicationSubmittedMail(
+            Mail::to($email)->sendNow(new ApplicationSubmittedMail(
                 application: $application,
                 adminUrl: route('admin.applications.index'),
             ));

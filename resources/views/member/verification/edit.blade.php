@@ -76,7 +76,6 @@
                             <p class="mt-2 text-[0.72rem] text-boss-ivory/28">{{ __('Existing file on record. Leave blank to keep it.') }}</p>
                         @endif
                     </div>
-
                 </div>
 
                 <div class="mt-6 flex flex-wrap items-center justify-between gap-3">
@@ -87,4 +86,3 @@
         @endif
     </div>
 </x-member-layout>
-

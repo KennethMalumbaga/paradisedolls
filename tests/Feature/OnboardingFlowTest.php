@@ -14,9 +14,11 @@ use App\Models\Course;
 use App\Models\CourseAccessRequest;
 use App\Models\ModelApplication;
 use App\Models\ModelProfile;
+use App\Models\ModelReferral;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
@@ -50,7 +52,28 @@ class OnboardingFlowTest extends TestCase
         $this->assertSame('+639123456789', $application->phone);
         $this->assertCount(1, $application->photo_paths);
         Storage::disk('local')->assertExists($application->photo_paths[0]);
-        Mail::assertQueued(ApplicationSubmittedMail::class);
+        Mail::assertSent(ApplicationSubmittedMail::class);
+    }
+
+    public function test_application_submission_rejects_photos_larger_than_ten_megabytes(): void
+    {
+        Mail::fake();
+        Storage::fake('local');
+
+        $this->post(route('apply.store'), [
+            'name' => 'Kayla Test',
+            'email' => 'kayla@example.com',
+            'phone_country' => 'PH',
+            'phone_number' => '912 345 6789',
+            'experience_level' => 'beginner',
+            'age_confirmed' => '1',
+            'photos' => [
+                $this->fakeLargePng('large-photo.png'),
+            ],
+        ])->assertSessionHasErrors('photos.0');
+
+        $this->assertDatabaseCount('model_applications', 0);
+        Mail::assertNothingSent();
     }
 
     public function test_application_submission_rejects_invalid_phone_numbers(): void
@@ -68,6 +91,22 @@ class OnboardingFlowTest extends TestCase
 
         $this->assertDatabaseCount('model_applications', 0);
         Mail::assertNothingSent();
+    }
+
+    public function test_application_submission_accepts_expanded_country_phone_prefixes(): void
+    {
+        Mail::fake();
+
+        $this->post(route('apply.store'), [
+            'name' => 'Island Applicant',
+            'email' => 'island@example.com',
+            'phone_country' => 'DO-829',
+            'phone_number' => '555 1234',
+            'experience_level' => 'beginner',
+            'age_confirmed' => '1',
+        ])->assertRedirect(route('home').'#apply');
+
+        $this->assertSame('+18295551234', ModelApplication::first()?->phone);
     }
 
     public function test_application_submission_rejects_invalid_email_addresses(): void
@@ -123,7 +162,7 @@ class OnboardingFlowTest extends TestCase
         $this->assertNotNull($notification);
         $this->assertSame('application_approved', $notification->data['category']);
         $this->assertSame('Application approved', $notification->data['title']);
-        Mail::assertQueued(MemberApplicationApprovedMail::class);
+        Mail::assertSent(MemberApplicationApprovedMail::class);
     }
 
     public function test_admin_approval_shows_temporary_password_when_mailer_cannot_deliver(): void
@@ -183,6 +222,296 @@ class OnboardingFlowTest extends TestCase
         Mail::assertNothingSent();
     }
 
+    public function test_admin_can_resend_application_approval_email_with_fresh_temporary_password(): void
+    {
+        Mail::fake();
+        config([
+            'mail.default' => 'smtp',
+            'mail.mailers.smtp.host' => 'smtp.gmail.com',
+            'mail.mailers.smtp.port' => 465,
+            'mail.mailers.smtp.username' => 'sender@example.com',
+            'mail.mailers.smtp.password' => 'test-password',
+            'mail.from.address' => 'sender@example.com',
+        ]);
+
+        $admin = User::factory()->create(['role' => 'admin']);
+        $member = User::factory()->create([
+            'name' => 'Approved Model',
+            'email' => 'approved@example.com',
+            'role' => 'model',
+            'password' => Hash::make('old-password'),
+            'email_verified_at' => null,
+        ]);
+        $application = ModelApplication::create([
+            'name' => 'Approved Model',
+            'email' => 'approved@example.com',
+            'experience_level' => 'none',
+            'age_confirmed' => true,
+        ]);
+        $application->forceFill([
+            'status' => ModelApplication::STATUS_APPROVED,
+            'reviewed_by' => $admin->id,
+            'reviewed_at' => now(),
+            'user_id' => $member->id,
+        ])->save();
+        ModelProfile::create([
+            'user_id' => $member->id,
+            'model_application_id' => $application->id,
+        ]);
+
+        $this->actingAs($admin)
+            ->post(route('admin.applications.resend-approval-email', $application))
+            ->assertRedirect()
+            ->assertSessionHas('status', 'Approval email resent to approved@example.com. A fresh temporary password was created for the member.');
+
+        Mail::assertSent(MemberApplicationApprovedMail::class, function (MemberApplicationApprovedMail $mail) use ($member) {
+            return $mail->memberName === 'Approved Model'
+                && $mail->loginUrl === route('login')
+                && $mail->onboardingUrl === route('member.onboarding.edit')
+                && Hash::check($mail->temporaryPassword, $member->fresh()->password);
+        });
+
+        $member->refresh();
+
+        $this->assertNotNull($member->email_verified_at);
+        $this->assertFalse(Hash::check('old-password', $member->password));
+        $this->assertSame('application_approval_resent', $member->notifications()->first()?->data['category']);
+    }
+
+    public function test_admin_cannot_resend_application_approval_email_after_member_has_logged_in(): void
+    {
+        Mail::fake();
+
+        $admin = User::factory()->create(['role' => 'admin']);
+        $member = User::factory()->create([
+            'email' => 'logged-in@example.com',
+            'role' => 'model',
+            'last_login_at' => now(),
+        ]);
+        $application = ModelApplication::create([
+            'name' => 'Logged In Model',
+            'email' => 'logged-in@example.com',
+            'experience_level' => 'none',
+            'age_confirmed' => true,
+        ]);
+        $application->forceFill([
+            'status' => ModelApplication::STATUS_APPROVED,
+            'user_id' => $member->id,
+        ])->save();
+        ModelProfile::create([
+            'user_id' => $member->id,
+            'model_application_id' => $application->id,
+        ]);
+
+        $this->actingAs($admin)
+            ->post(route('admin.applications.resend-approval-email', $application))
+            ->assertRedirect()
+            ->assertSessionHasErrors('application');
+
+        Mail::assertNothingSent();
+    }
+
+    public function test_admin_cannot_resend_application_approval_email_after_onboarding_is_submitted(): void
+    {
+        Mail::fake();
+
+        $admin = User::factory()->create(['role' => 'admin']);
+        $member = User::factory()->create([
+            'email' => 'submitted@example.com',
+            'role' => 'model',
+            'last_login_at' => null,
+        ]);
+        $application = ModelApplication::create([
+            'name' => 'Submitted Model',
+            'email' => 'submitted@example.com',
+            'experience_level' => 'none',
+            'age_confirmed' => true,
+        ]);
+        $application->forceFill([
+            'status' => ModelApplication::STATUS_APPROVED,
+            'user_id' => $member->id,
+        ])->save();
+        ModelProfile::create([
+            'user_id' => $member->id,
+            'model_application_id' => $application->id,
+            'information_submitted_at' => now(),
+        ]);
+
+        $this->actingAs($admin)
+            ->post(route('admin.applications.resend-approval-email', $application))
+            ->assertRedirect()
+            ->assertSessionHasErrors('application');
+
+        Mail::assertNothingSent();
+    }
+
+    public function test_admin_cannot_resend_application_approval_email_for_pending_application(): void
+    {
+        Mail::fake();
+
+        $admin = User::factory()->create(['role' => 'admin']);
+        $application = ModelApplication::create([
+            'name' => 'Pending Model',
+            'email' => 'pending-resend@example.com',
+            'experience_level' => 'beginner',
+            'age_confirmed' => true,
+        ]);
+
+        $this->actingAs($admin)
+            ->post(route('admin.applications.resend-approval-email', $application))
+            ->assertRedirect()
+            ->assertSessionHasErrors('application');
+
+        Mail::assertNothingSent();
+    }
+
+    public function test_admin_can_see_resend_application_approval_email_action_on_onboarding_profile(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+        $member = User::factory()->create([
+            'name' => 'Onboarding Model',
+            'email' => 'onboarding-approved@example.com',
+            'role' => 'model',
+        ]);
+        $application = ModelApplication::create([
+            'name' => 'Onboarding Model',
+            'email' => 'onboarding-approved@example.com',
+            'experience_level' => 'beginner',
+            'age_confirmed' => true,
+        ]);
+        $application->forceFill([
+            'status' => ModelApplication::STATUS_APPROVED,
+            'user_id' => $member->id,
+        ])->save();
+        $profile = ModelProfile::create([
+            'user_id' => $member->id,
+            'model_application_id' => $application->id,
+        ]);
+
+        $this->actingAs($admin)
+            ->get(route('admin.onboarding.show', $profile))
+            ->assertOk()
+            ->assertSee('Resend Application Approval Email')
+            ->assertSee(route('admin.applications.resend-approval-email', $application), false);
+    }
+
+    public function test_admin_does_not_see_resend_application_approval_email_action_after_onboarding_is_submitted(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+        $member = User::factory()->create([
+            'name' => 'Submitted Model',
+            'email' => 'onboarding-submitted@example.com',
+            'role' => 'model',
+            'last_login_at' => null,
+        ]);
+        $application = ModelApplication::create([
+            'name' => 'Submitted Model',
+            'email' => 'onboarding-submitted@example.com',
+            'experience_level' => 'beginner',
+            'age_confirmed' => true,
+        ]);
+        $application->forceFill([
+            'status' => ModelApplication::STATUS_APPROVED,
+            'user_id' => $member->id,
+        ])->save();
+        $profile = ModelProfile::create([
+            'user_id' => $member->id,
+            'model_application_id' => $application->id,
+            'information_submitted_at' => now(),
+        ]);
+
+        $this->actingAs($admin)
+            ->get(route('admin.onboarding.show', $profile))
+            ->assertOk()
+            ->assertDontSee('Resend Application Approval Email')
+            ->assertDontSee(route('admin.applications.resend-approval-email', $application), false);
+    }
+
+    public function test_admin_can_delete_rejected_application_and_uploaded_photos(): void
+    {
+        Storage::fake('local');
+
+        $admin = User::factory()->create(['role' => 'admin']);
+        $referrer = User::factory()->create(['role' => 'model']);
+
+        $application = ModelApplication::create([
+            'name' => 'Rejected Model',
+            'email' => 'rejected@example.com',
+            'experience_level' => 'beginner',
+            'age_confirmed' => true,
+            'photo_paths' => ['applications/photos/rejected.jpg'],
+        ]);
+        $application->forceFill(['status' => ModelApplication::STATUS_REJECTED])->save();
+
+        $referral = ModelReferral::create([
+            'referrer_id' => $referrer->id,
+            'model_application_id' => $application->id,
+            'candidate_name' => 'Rejected Model',
+            'candidate_email' => 'rejected@example.com',
+            'experience_level' => 'beginner',
+            'photo_paths' => ['applications/photos/rejected.jpg'],
+            'consent_confirmed' => true,
+            'source' => ModelReferral::SOURCE_APPLY_LINK,
+            'status' => ModelReferral::STATUS_REJECTED,
+            'reward_status' => ModelReferral::REWARD_NOT_ELIGIBLE,
+        ]);
+
+        Storage::disk('local')->put('applications/photos/rejected.jpg', 'photo');
+
+        $this->actingAs($admin)
+            ->get(route('admin.applications.index'))
+            ->assertOk()
+            ->assertSee('Delete Rejected Application')
+            ->assertSee('Delete rejected application?')
+            ->assertDontSee('return confirm', false);
+
+        $this->actingAs($admin)
+            ->delete(route('admin.applications.destroy', $application))
+            ->assertRedirect()
+            ->assertSessionHas('status', 'Rejected application deleted.');
+
+        $this->assertDatabaseMissing('model_applications', ['id' => $application->id]);
+        $this->assertDatabaseMissing('model_referrals', ['id' => $referral->id]);
+        Storage::disk('local')->assertMissing('applications/photos/rejected.jpg');
+    }
+
+    public function test_admin_cannot_delete_pending_application(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+        $application = ModelApplication::create([
+            'name' => 'Pending Model',
+            'email' => 'pending@example.com',
+            'experience_level' => 'beginner',
+            'age_confirmed' => true,
+        ]);
+
+        $this->actingAs($admin)
+            ->delete(route('admin.applications.destroy', $application))
+            ->assertRedirect()
+            ->assertSessionHasErrors('application');
+
+        $this->assertDatabaseHas('model_applications', ['id' => $application->id]);
+    }
+
+    public function test_admin_can_see_member_delete_action_on_onboarding_profile(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+        $member = User::factory()->create([
+            'name' => 'Onboarding Model',
+            'email' => 'onboarding-model@example.com',
+            'role' => 'model',
+        ]);
+        $profile = ModelProfile::create([
+            'user_id' => $member->id,
+        ]);
+
+        $this->actingAs($admin)
+            ->get(route('admin.onboarding.show', $profile))
+            ->assertOk()
+            ->assertSee('Delete member account')
+            ->assertSee(route('admin.models.destroy', $member), false);
+    }
+
     public function test_member_can_submit_information_and_verification_documents(): void
     {
         Mail::fake();
@@ -200,7 +529,7 @@ class OnboardingFlowTest extends TestCase
                 'country' => 'United Kingdom',
                 'city' => 'London',
                 'timezone' => 'Europe/London',
-                'platforms' => ['Stripchat', 'OnlyFans'],
+                'platforms' => ['CAM4', 'OnlyFans'],
                 'equipment' => ['Phone', 'Ring light'],
                 'availability' => 'Evenings and weekends.',
                 'goals' => 'Build a consistent online income.',
@@ -217,7 +546,7 @@ class OnboardingFlowTest extends TestCase
         $this->assertNotNull($profile->information_submitted_at);
         $this->assertSame('+447700900555', $profile->phone);
         $this->assertSame('+639854747065', $profile->emergency_contact_phone);
-        $this->assertSame(['Stripchat', 'OnlyFans'], $profile->platforms);
+        $this->assertSame(['CAM4', 'OnlyFans'], $profile->platforms);
         $this->assertSame('stage-name', $profile->discord_username);
         Mail::assertQueued(ModelInformationSubmittedMail::class);
 
@@ -321,7 +650,7 @@ class OnboardingFlowTest extends TestCase
             ->assertDontSeeText('Submit Verification');
     }
 
-    public function test_verified_member_can_upload_platform_code_proof_without_reuploading_id_documents(): void
+    public function test_member_verification_no_longer_accepts_platform_code_proof(): void
     {
         Mail::fake();
         Storage::fake('local');
@@ -343,21 +672,22 @@ class OnboardingFlowTest extends TestCase
             ->get(route('member.verification.edit'))
             ->assertOk()
             ->assertSeeText('Existing file on record. Leave blank to keep it.')
-            ->assertSeeText('Use this for QR/code screenshots or platform verification proof Kayla requests for course access.');
+            ->assertDontSeeText('Platform codes')
+            ->assertDontSee('name="platform_codes"', false);
 
         $this->actingAs($member)
             ->post(route('member.verification.store'), [
                 'platform_codes' => $this->fakePng('stripchat-qr.png'),
             ])
-            ->assertRedirect(route('member.dashboard'));
+            ->assertSessionHasErrors('id_document');
 
         $profile->refresh();
 
         $this->assertSame(ModelProfile::VERIFICATION_VERIFIED, $profile->verification_status);
         $this->assertSame('verifications/1/id.jpg', $profile->id_document_path);
         $this->assertSame('verifications/1/selfie.jpg', $profile->selfie_with_id_path);
-        Storage::disk('local')->assertExists($profile->platform_codes_path);
-        Mail::assertQueued(VerificationSubmissionReceivedMail::class);
+        $this->assertNull($profile->platform_codes_path);
+        Mail::assertNothingQueued();
     }
 
     public function test_admin_resubmission_requires_note_and_emails_member(): void
@@ -411,6 +741,58 @@ class OnboardingFlowTest extends TestCase
             ->assertSeeText('Discord Invites');
     }
 
+    public function test_admin_can_approve_existing_documents_after_a_reverification_request(): void
+    {
+        Mail::fake();
+
+        $admin = User::factory()->create(['role' => 'admin']);
+        $member = User::factory()->create(['role' => 'model']);
+        $submittedAt = now()->subDay()->startOfSecond();
+        $profile = ModelProfile::create([
+            'user_id' => $member->id,
+            'information_submitted_at' => now(),
+            'verification_status' => ModelProfile::VERIFICATION_SUBMITTED,
+            'id_document_path' => 'verifications/1/id.jpg',
+            'selfie_with_id_path' => 'verifications/1/selfie.jpg',
+            'verification_submitted_at' => $submittedAt,
+        ]);
+
+        $this->actingAs($admin)
+            ->post(route('admin.onboarding.reject-verification', $profile), [
+                'verification_notes' => 'Please submit verification again.',
+            ])
+            ->assertRedirect();
+
+        $this->actingAs($admin)
+            ->post(route('admin.onboarding.request-verification', $profile))
+            ->assertRedirect();
+
+        $profile->refresh();
+
+        $this->assertSame(ModelProfile::VERIFICATION_REQUESTED, $profile->verification_status);
+        $this->assertTrue($profile->canApproveVerification());
+        $this->assertTrue($profile->verification_submitted_at->equalTo($submittedAt));
+
+        $this->actingAs($admin)
+            ->get(route('admin.onboarding.show', $profile))
+            ->assertOk()
+            ->assertSeeText('Approve & Send Approval Email')
+            ->assertSeeText('The member does not need to submit them again.');
+
+        $this->actingAs($admin)
+            ->post(route('admin.onboarding.verify', $profile))
+            ->assertRedirect()
+            ->assertSessionHasNoErrors();
+
+        $profile->refresh();
+
+        $this->assertSame(ModelProfile::VERIFICATION_VERIFIED, $profile->verification_status);
+        $this->assertTrue($profile->verification_submitted_at->equalTo($submittedAt));
+        Mail::assertQueued(VerificationResubmissionMail::class);
+        Mail::assertQueued(VerificationRequestMail::class);
+        Mail::assertQueued(AccountApprovalMail::class);
+    }
+
     public function test_admin_can_approve_verification_and_send_community_access(): void
     {
         Mail::fake();
@@ -438,17 +820,57 @@ class OnboardingFlowTest extends TestCase
         Mail::assertQueued(AccountApprovalMail::class);
 
         $this->actingAs($admin)
-            ->post(route('admin.onboarding.community-invite', $profile))
+            ->post(route('admin.onboarding.community-invite', $profile), [
+                'community_url' => 'https://discord.gg/freshInvite',
+            ])
             ->assertRedirect();
 
-        $this->assertNotNull($profile->fresh()->community_invited_at);
-        Mail::assertQueued(CommunityAccessMail::class);
+        $profile->refresh();
+        $this->assertNotNull($profile->community_invited_at);
+        $this->assertSame('https://discord.gg/freshInvite', $profile->community_invite_url);
+        Mail::assertQueued(
+            CommunityAccessMail::class,
+            fn (CommunityAccessMail $mail) => $mail->communityUrl === 'https://discord.gg/freshInvite'
+        );
+
+        $this->actingAs($member)
+            ->get(route('member.dashboard'))
+            ->assertOk()
+            ->assertSee('https://discord.gg/freshInvite', false)
+            ->assertSeeText('Open Discord invite');
 
         $this->actingAs($admin)
             ->post(route('admin.onboarding.community-role-assigned', $profile))
             ->assertRedirect();
 
         $this->assertNotNull($profile->fresh()->community_role_assigned_at);
+    }
+
+    public function test_admin_must_enter_valid_discord_invite_before_sending_community_access(): void
+    {
+        Mail::fake();
+
+        $admin = User::factory()->create(['role' => 'admin']);
+        $member = User::factory()->create(['role' => 'model']);
+        $profile = ModelProfile::create([
+            'user_id' => $member->id,
+            'information_submitted_at' => now(),
+            'verification_status' => ModelProfile::VERIFICATION_VERIFIED,
+            'verification_submitted_at' => now(),
+            'verification_reviewed_by' => $admin->id,
+            'verification_reviewed_at' => now(),
+            'id_document_path' => 'verifications/1/id.jpg',
+            'selfie_with_id_path' => 'verifications/1/selfie.jpg',
+        ]);
+
+        $this->actingAs($admin)
+            ->post(route('admin.onboarding.community-invite', $profile), [
+                'community_url' => 'https://example.com/not-discord',
+            ])
+            ->assertSessionHasErrors('community_url');
+
+        $this->assertNull($profile->fresh()->community_invited_at);
+        Mail::assertNotQueued(CommunityAccessMail::class);
     }
 
     public function test_admin_cannot_assign_community_chat_before_verification(): void
@@ -726,5 +1148,12 @@ class OnboardingFlowTest extends TestCase
         $png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=');
 
         return UploadedFile::fake()->createWithContent($name, $png);
+    }
+
+    private function fakeLargePng(string $name): UploadedFile
+    {
+        $png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=');
+
+        return UploadedFile::fake()->createWithContent($name, str_pad($png, (10 * 1024 * 1024) + 1, '0'));
     }
 }

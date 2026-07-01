@@ -10,29 +10,20 @@
         $blueprintOrder = marketing_items('home.blueprint.order_items');
         $groundedCards = marketing_items('home.grounded.cards');
         $countryCallingCodes = config('country_calling_codes', []);
-        $selectedPhoneCountry = old('phone_country', 'PH');
-        $phoneCountries = collect($countryCallingCodes)
-            ->map(fn (array $country, string $countryCode) => [
-                'value'   => $countryCode,
-                'name'    => $country['name'],
-                'code'    => $country['code'],
-                'dialNum' => (int) ltrim($country['code'], '+'),
-                'flag'    => 'https://flagcdn.com/w40/'.strtolower($countryCode).'.png',
-            ])
-            ->sortBy('dialNum')
-            ->values();
+        $phoneCountries = \App\Support\CountryCallingCodes::phoneOptions($countryCallingCodes);
+        $selectedPhoneCountry = \App\Support\CountryCallingCodes::normalizeSelection(old('phone_country', 'GB'), $phoneCountries);
     @endphp
 
-    <section class="relative flex min-h-screen items-center overflow-hidden">
+    <section class="pd-marketing-image-hero relative flex min-h-screen items-center overflow-hidden">
         <img src="{{ $heroImg }}" alt="" class="absolute inset-0 h-full w-full object-cover" aria-hidden="true">
         <div class="absolute inset-0 bg-gradient-to-b from-black/45 via-black/40 to-boss-dark/95"></div>
 
         <div class="relative z-10 mx-auto w-full max-w-7xl px-4 pt-24 sm:px-6 lg:px-8">
             <div class="max-w-4xl text-white">
-                <h1 class="font-display text-[clamp(3.1rem,8vw,7rem)] leading-[0.96] text-white">
+                <h1 class="pd-marketing-image-hero-title font-display text-[clamp(3.1rem,8vw,7rem)] leading-[0.96] text-[#FFF8F6]">
                     {{ marketing_content('home.hero.title') }}
                 </h1>
-                <p class="mt-7 max-w-2xl text-[1.05rem] leading-relaxed text-white/78">
+                <p class="pd-marketing-image-hero-body mt-7 max-w-2xl text-[1.05rem] leading-relaxed text-[#FFF8F6]/90">
                     @foreach ($heroParagraphs as $paragraph)
                         {{ $paragraph }}@if (! $loop->last)<br><br>@endif
                     @endforeach
@@ -346,10 +337,10 @@
                                         get filtered() {
                                             const q = this.search.trim().toLowerCase();
                                             if (!q) return this.countries;
+                                            const qDigits = q.replace(/\D/g, '');
                                             return this.countries.filter(c =>
-                                                c.code.replace('+','').startsWith(q) ||
-                                                c.code.includes(q) ||
-                                                c.name.toLowerCase().includes(q)
+                                                `${c.search || ''} ${c.code} ${c.name}`.toLowerCase().includes(q) ||
+                                                (qDigits && `${c.search || ''} ${c.code}`.replace(/\D/g, '').includes(qDigits))
                                             );
                                         },
                                         openDropdown() {
@@ -496,7 +487,7 @@
                             <p class="mt-2 hidden text-[0.76rem] leading-relaxed text-red-600" data-photo-error></p>
                             <div class="mt-3 grid gap-3 sm:grid-cols-2" data-photo-preview></div>
                         </div>
-                        <p class="mt-2 text-[0.72rem] text-boss-dark/38">{{ __('Upload up to 6 clear photos. JPG, PNG, or WEBP.') }}</p>
+                        <p class="mt-2 text-[0.72rem] text-boss-dark/38">{{ __('Upload up to 6 clear photos. JPG, PNG, or WEBP. Max 10MB each.') }}</p>
                         <x-input-error class="mt-1.5" :messages="$errors->get('photos')" />
                         <x-input-error class="mt-1.5" :messages="$errors->get('photos.*')" />
                     </div>
@@ -513,7 +504,11 @@
                     </div>
                     <x-input-error class="-mt-2" :messages="$errors->get('age_confirmed')" />
 
-                    <button type="submit" class="w-full rounded-md bg-[#EEB4C3] py-4 text-[0.75rem] uppercase tracking-[0.2em] text-white transition-colors hover:bg-[#e0a0b5]">{{ __('Submit Application') }}</button>
+                    <button type="submit" data-application-submit class="flex w-full items-center justify-center gap-3 rounded-md bg-[#EEB4C3] py-4 text-[0.75rem] uppercase tracking-[0.2em] text-white transition-colors hover:bg-[#e0a0b5] disabled:cursor-not-allowed disabled:opacity-70">
+                        <span data-submit-spinner class="hidden h-4 w-4 rounded-full border-2 border-white/40 border-t-white motion-safe:animate-spin" aria-hidden="true"></span>
+                        <span data-submit-label>{{ __('Submit Application') }}</span>
+                        <span data-submit-loading-label class="hidden">{{ __('Submitting...') }}</span>
+                    </button>
                     <p class="text-center text-[0.75rem] text-boss-dark/40">{{ marketing_content('home.apply.footer_note') }}</p>
                 </form>
                 <script>

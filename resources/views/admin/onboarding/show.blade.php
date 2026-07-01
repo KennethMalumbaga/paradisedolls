@@ -1,5 +1,5 @@
 <x-admin-layout>
-    <div class="mx-auto max-w-6xl space-y-6 text-boss-ivory">
+    <div class="pd-admin-onboarding pd-admin-onboarding-profile mx-auto max-w-6xl space-y-6 text-boss-ivory">
 
         {{-- ── Header ──────────────────────────────────────────────── --}}
         <div class="flex flex-wrap items-start justify-between gap-4">
@@ -22,6 +22,9 @@
                 </div>
             </div>
             <div class="flex flex-wrap items-center gap-2">
+                <a href="{{ route('admin.onboarding.export-profile', $profile) }}" class="rounded-xl border border-boss-gold/20 bg-boss-gold/[0.07] px-3 py-1.5 text-[0.72rem] font-semibold text-boss-gold transition hover:bg-boss-gold/[0.13]">
+                    {{ __('Download CRM Excel') }}
+                </a>
                 <span class="rounded-full border border-white/[0.08] bg-white/[0.04] px-3 py-1 text-[0.72rem] text-boss-ivory/60">
                     {{ $profile->onboardingStageLabel() }}
                 </span>
@@ -35,6 +38,18 @@
         {{-- ── Flash messages ──────────────────────────────────────── --}}
         @if (session('status'))
             <div class="rounded-xl border border-green-400/20 bg-green-400/10 p-4 text-sm text-green-200">{{ session('status') }}</div>
+        @endif
+        @if (session('warning'))
+            <div class="space-y-3 rounded-xl border border-amber-300/20 bg-amber-300/10 p-4 text-sm text-amber-100">
+                <p>{{ session('warning') }}</p>
+                @if (session('approval_fallback_password'))
+                    <div class="rounded-xl border border-amber-300/25 bg-boss-ink px-4 py-3 text-boss-ivory">
+                        <p class="text-[0.65rem] uppercase tracking-[0.14em] text-amber-200/60">{{ __('Temporary password (email failed)') }}</p>
+                        <p class="mt-1 text-xs text-boss-ivory/40">{{ session('approval_fallback_email') }}</p>
+                        <p class="mt-2 select-all break-all font-mono text-base font-semibold tracking-wide">{{ session('approval_fallback_password') }}</p>
+                    </div>
+                @endif
+            </div>
         @endif
         @if ($errors->any())
             <div class="rounded-xl border border-red-400/20 bg-red-400/10 p-4 text-sm text-red-200">
@@ -90,7 +105,6 @@
                             ['Phone',             $profile->phone],
                             ['Country',           $profile->country],
                             ['City',              $profile->city],
-                            ['Timezone',          $profile->timezone],
                             ['Nationality',       $profile->nationality],
                             ['Spoken Languages',  $profile->spoken_languages],
                             ['Social Handles',    $profile->social_handles],
@@ -148,7 +162,7 @@
                             @endif
                             @if ($profile->current_platforms)
                                 <div>
-                                    <p class="mb-1 text-[0.7rem] text-boss-ivory/40">{{ __('Currently active on') }}</p>
+                                    <p class="mb-1 text-[0.7rem] text-boss-ivory/40">{{ __('Current platforms and usernames') }}</p>
                                     <p class="text-[0.82rem] leading-relaxed text-boss-ivory/70">{{ $profile->current_platforms }}</p>
                                 </div>
                             @endif
@@ -312,21 +326,20 @@
                     </section>
                 @endif
 
-                {{-- Emergency Contact & Discord --}}
-                @if ($profile->emergency_contact_name || $profile->emergency_contact_phone || $profile->discord_username || $profile->discord_user_id)
+                {{-- Discord --}}
+                @if ($profile->discord_username || $profile->discord_user_id || $profile->community_invite_url)
                     <section class="pd-panel-strong p-5">
-                        <p class="mb-4 text-[0.66rem] uppercase tracking-[0.18em] text-boss-ivory/35">{{ __('Emergency Contact & Discord') }}</p>
+                        <p class="mb-4 text-[0.66rem] uppercase tracking-[0.18em] text-boss-ivory/35">{{ __('Discord') }}</p>
                         <div class="grid grid-cols-2 gap-x-6 gap-y-3 text-[0.82rem]">
                             @foreach ([
-                                ['Contact Name',    $profile->emergency_contact_name],
-                                ['Contact Phone',   $profile->emergency_contact_phone],
                                 ['Discord Username',$profile->discord_username],
                                 ['Discord User ID', $profile->discord_user_id],
+                                ['Last Invite Link', $profile->community_invite_url],
                             ] as [$label, $value])
                                 @if ($value)
                                     <div>
                                         <p class="text-[0.62rem] uppercase tracking-[0.1em] text-boss-ivory/28">{{ $label }}</p>
-                                        <p class="mt-0.5 text-boss-ivory/75">{{ $value }}</p>
+                                        <p class="mt-0.5 break-all text-boss-ivory/75">{{ $value }}</p>
                                     </div>
                                 @endif
                             @endforeach
@@ -358,6 +371,18 @@
                     </form>
 
                     <div class="space-y-2">
+                        @if ($profile->application?->canResendApprovalEmail())
+                            <form action="{{ route('admin.applications.resend-approval-email', $profile->application) }}" method="POST" class="rounded-xl border border-green-300/15 bg-green-400/[0.06] p-3">
+                                @csrf
+                                <button type="submit" class="w-full rounded-xl border border-green-300/20 bg-green-400/10 px-4 py-2.5 text-sm font-semibold text-green-200 transition hover:bg-green-400/20">
+                                    {{ __('Resend Application Approval Email') }}
+                                </button>
+                                <p class="mt-2 text-center text-[0.68rem] leading-relaxed text-green-100/45">
+                                    {{ __('Creates a fresh temporary password and emails the login plus Model Information Form instructions again.') }}
+                                </p>
+                            </form>
+                        @endif
+
                         {{-- Request verification --}}
                         @if ($profile->hasInformationForm() && ! $profile->isVerified() && $profile->verification_status !== \App\Models\ModelProfile::VERIFICATION_SUBMITTED)
                             <form action="{{ route('admin.onboarding.request-verification', $profile) }}" method="POST">
@@ -367,11 +392,14 @@
                         @endif
 
                         {{-- Verify --}}
-                        @if ($profile->verification_status === \App\Models\ModelProfile::VERIFICATION_SUBMITTED)
+                        @if ($profile->canApproveVerification())
                             <form action="{{ route('admin.onboarding.verify', $profile) }}" method="POST" class="space-y-2">
                                 @csrf
                                 <textarea name="verification_notes" rows="2" class="pd-input w-full text-sm" placeholder="{{ __('Optional approval notes…') }}">{{ old('verification_notes', $profile->verification_notes) }}</textarea>
                                 <button type="submit" class="w-full rounded-xl bg-green-500/20 px-4 py-2.5 text-sm font-medium text-green-300 transition hover:bg-green-500/30">{{ __('✓ Approve & Send Approval Email') }}</button>
+                                <p class="text-center text-[0.68rem] leading-relaxed text-green-100/45">
+                                    {{ __('Uses the existing verification documents. The member does not need to submit them again.') }}
+                                </p>
                             </form>
                         @endif
 
@@ -385,10 +413,23 @@
                         @endif
 
                         {{-- Community invite --}}
-                        @if ($profile->isVerified() && ! $profile->community_invited_at)
-                            <form action="{{ route('admin.onboarding.community-invite', $profile) }}" method="POST">
+                        @if ($profile->isVerified() && ! $profile->community_role_assigned_at)
+                            <form action="{{ route('admin.onboarding.community-invite', $profile) }}" method="POST" class="space-y-2">
                                 @csrf
-                                <button type="submit" class="pd-btn-primary w-full text-sm">{{ __('Send Discord Community Access Email') }}</button>
+                                <label for="community_url" class="pd-label">{{ __('Discord invite link') }}</label>
+                                <input
+                                    id="community_url"
+                                    name="community_url"
+                                    type="url"
+                                    value="{{ old('community_url', $profile->community_invite_url ?: config('paradise.community_url')) }}"
+                                    placeholder="https://discord.gg/example"
+                                    class="pd-input w-full text-sm"
+                                    required
+                                >
+                                <p class="text-[0.72rem] leading-relaxed text-boss-ivory/35">{{ __('Paste the current Discord invite link before sending. If an old invite expires, paste a fresh one and resend it here.') }}</p>
+                                <button type="submit" class="pd-btn-primary w-full text-sm">
+                                    {{ $profile->community_invited_at ? __('Resend Discord Community Access Email') : __('Send Discord Community Access Email') }}
+                                </button>
                             </form>
                         @endif
 
@@ -404,6 +445,22 @@
                             <p class="py-2 text-center text-sm text-green-300/70">{{ __('Fully onboarded ✓') }}</p>
                         @endif
                     </div>
+                    <form
+                        action="{{ route('admin.models.destroy', $user) }}"
+                        method="POST"
+                        class="mt-5 border-t border-red-300/10 pt-4"
+                        onsubmit="return confirm('{{ __('Delete this member account? This permanently removes their login, onboarding profile, uploaded files, course progress, and linked application.') }}');"
+                    >
+                        @csrf
+                        @method('DELETE')
+                        <input type="hidden" name="confirm_member_delete" value="1">
+                        <button type="submit" class="w-full rounded-xl border border-red-300/15 bg-red-400/10 px-4 py-2.5 text-sm font-semibold text-red-200 transition hover:border-red-300/35 hover:bg-red-400/15">
+                            {{ __('Delete member account') }}
+                        </button>
+                        <p class="mt-2 text-center text-[0.68rem] leading-relaxed text-boss-ivory/28">
+                            {{ __('Permanent removal for this model account and its onboarding records.') }}
+                        </p>
+                    </form>
                 </section>
 
                 {{-- Verification status --}}
@@ -487,7 +544,7 @@
             @php
                 $reviewCourseRequestId = (int) request()->query('course_request', 0);
             @endphp
-            <section class="pd-panel-strong p-5">
+            <section class="pd-onboarding-access-panel pd-panel-strong p-5">
                 <div class="mb-5 flex items-center justify-between">
                     <div>
                         <p class="text-[0.66rem] uppercase tracking-[0.18em] text-boss-ivory/35">{{ __('Website Walkthrough Access') }}</p>
@@ -501,7 +558,7 @@
                             $accessRequest = $accessRequestsByCourse->get($course->id);
                         @endphp
                         <div
-                            class="flex min-h-[13rem] flex-col overflow-hidden rounded-xl border transition
+                            class="pd-onboarding-access-card flex min-h-[13rem] flex-col overflow-hidden rounded-xl border transition
                                 {{ $isUnlocked ? 'border-green-400/20 bg-green-400/[0.04]' : 'border-white/[0.06] bg-white/[0.02]' }}"
                             x-data="{ requestOpen: @js($accessRequest && (int) $accessRequest->id === $reviewCourseRequestId), showResubmit: false }"
                             @keydown.escape.window="requestOpen = false"
