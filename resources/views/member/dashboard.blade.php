@@ -134,8 +134,11 @@
                                 </div>
                                 <h3 class="pd-heading text-[1.25rem] text-boss-ivory transition-colors group-hover:text-boss-gold-light">{{ $course->title }}</h3>
                                 <p class="mt-3 line-clamp-2 text-[0.78rem] leading-relaxed text-boss-ivory/40">{{ $course->short_description ?: $course->description }}</p>
-                                <div class="mt-5 flex items-center justify-between">
-                                    <span class="text-[0.75rem] font-medium text-boss-gold">{{ __('Continue') }}</span>
+                                <div class="mt-5 flex flex-wrap items-center justify-between gap-3">
+                                    <span class="inline-flex min-h-11 items-center gap-2 rounded-xl bg-boss-gold px-4 py-2.5 text-[0.76rem] font-semibold text-boss-ink transition-all duration-300 group-hover:-translate-y-0.5 group-hover:bg-boss-gold-light">
+                                        {{ __('Continue') }}
+                                        <svg viewBox="0 0 16 16" class="h-4 w-4 fill-none stroke-current stroke-[2.2]"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+                                    </span>
                                     <span class="font-display text-boss-gold">{{ $progress['percent'] }}%</span>
                                 </div>
                             </div>
@@ -175,6 +178,9 @@
                         <div class="flex shrink-0 items-center gap-3">
                             <span class="text-[0.72rem] text-boss-ivory/30">{{ $progress['completed'] }}/{{ $progress['total'] }}</span>
                             <span class="min-w-10 text-right font-display text-[1rem] text-boss-gold">{{ $progress['percent'] }}%</span>
+                            <span class="hidden min-h-10 items-center rounded-xl border border-boss-gold/25 bg-boss-gold/[0.10] px-3.5 py-2 text-[0.72rem] font-semibold text-boss-gold transition-colors group-hover:bg-boss-gold group-hover:text-boss-ink sm:inline-flex">
+                                {{ __('Open') }}
+                            </span>
                         </div>
                     </a>
                 @empty
@@ -203,7 +209,10 @@
                             <span class="pd-badge">{{ $course->platform_label ?: __('General') }}</span>
                             <h3 class="pd-heading mt-3 text-[1rem] text-boss-ivory/65 transition-colors group-hover:text-boss-ivory">{{ $course->title }}</h3>
                             <p class="mt-2 text-[0.68rem] text-boss-ivory/25">{{ trans_choice(':count lesson|:count lessons', $course->lessons_count, ['count' => $course->lessons_count]) }}</p>
-                            <p class="mt-4 text-[0.72rem] text-boss-ivory/28 transition-colors group-hover:text-boss-gold">{{ __('Start course') }} -></p>
+                            <span class="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-boss-gold/25 bg-boss-gold/[0.10] px-4 py-2.5 text-[0.76rem] font-semibold text-boss-gold transition-all duration-300 group-hover:-translate-y-0.5 group-hover:bg-boss-gold group-hover:text-boss-ink">
+                                {{ __('Start course') }}
+                                <svg viewBox="0 0 16 16" class="h-4 w-4 fill-none stroke-current stroke-[2.2]"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+                            </span>
                         </a>
                     @endforeach
                 </div>
@@ -211,5 +220,4 @@
         @endif
     </div>
 </x-member-layout>
-
 

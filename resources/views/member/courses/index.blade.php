@@ -230,7 +230,11 @@
                         style="--platform-color: {{ $color }}; --pd-course-card-accent: {{ $color }};"
                     >
                         {{-- Course image / banner --}}
-                        <div class="pd-course-card-media relative h-[210px] shrink-0 overflow-hidden">
+                        <a
+                            href="{{ $primaryUrl }}"
+                            class="pd-course-card-media relative block h-[210px] shrink-0 overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-boss-gold focus-visible:ring-offset-2 focus-visible:ring-offset-boss-ink"
+                            aria-label="{{ __('Open :course', ['course' => $course->title]) }}"
+                        >
                             @if ($image)
                                 <img
                                     src="{{ $image }}"
@@ -269,10 +273,17 @@
                                 </span>
                             </div>
 
+                            <div class="absolute inset-x-4 bottom-4 flex justify-end">
+                                <span class="inline-flex min-h-10 items-center gap-2 rounded-full border border-white/15 bg-boss-ink/82 px-4 py-2 text-[0.72rem] font-semibold text-white shadow-[0_14px_34px_rgba(0,0,0,0.25)] backdrop-blur-md transition-all duration-300 group-hover:-translate-y-0.5 group-hover:border-white/25 group-hover:bg-boss-ink/92">
+                                    {{ $ctaLabel }}
+                                    <svg viewBox="0 0 16 16" class="h-3.5 w-3.5 fill-none stroke-current stroke-[2.2] transition-transform duration-300 group-hover:translate-x-0.5"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+                                </span>
+                            </div>
+
                             {{-- Bottom accent line --}}
                             <div class="absolute inset-x-0 bottom-0 h-[2px] opacity-50 transition-opacity duration-300 group-hover:opacity-90"
                                  style="background: linear-gradient(90deg, {{ $color }}, {{ $color }}22);"></div>
-                        </div>
+                        </a>
 
                         {{-- Card content --}}
                         <div class="flex flex-1 flex-col p-5">
@@ -338,20 +349,15 @@
                         </div>
 
                         {{-- Footer CTA --}}
-                        <div class="shrink-0 border-t border-white/[0.04] px-5 py-3.5 transition-colors duration-300 group-hover:bg-boss-gold/[0.04]">
-                            @if ($isEnrolled)
-                                <a href="{{ $primaryUrl }}" class="flex items-center justify-between gap-2 text-[0.73rem]">
-                                    <span class="font-medium transition-colors group-hover:text-boss-gold"
-                                          style="color: {{ $color }}; opacity: .78;">{{ $ctaLabel }}</span>
-                                    <svg viewBox="0 0 16 16" class="h-3.5 w-3.5 fill-none stroke-current stroke-[2] transition-transform duration-300 group-hover:translate-x-1"
-                                         style="color: {{ $color }}; opacity: .5;"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
-                                </a>
-                            @else
-                                <a href="{{ route('member.courses.show', $course->slug) }}" class="flex items-center justify-between gap-2 text-[0.73rem]">
-                                    <span class="font-semibold text-boss-gold transition-colors group-hover:text-boss-gold-light">{{ $ctaLabel }}</span>
-                                    <svg viewBox="0 0 16 16" class="h-3.5 w-3.5 fill-none stroke-current stroke-[2] text-boss-gold/50 transition-transform duration-300 group-hover:translate-x-1"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
-                                </a>
-                            @endif
+                        <div class="shrink-0 border-t border-white/[0.04] px-5 py-4 transition-colors duration-300 group-hover:bg-boss-gold/[0.04]">
+                            <a
+                                href="{{ $primaryUrl }}"
+                                class="pd-course-card-cta flex min-h-12 w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-center text-[0.78rem] font-semibold transition-all duration-300 hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-boss-gold focus-visible:ring-offset-2 focus-visible:ring-offset-boss-ink"
+                                style="background: {{ $isEnrolled ? 'linear-gradient(135deg, '.$color.', var(--pd-primary-hover))' : $course->displayColorBackground(0.42) }}; color: {{ $isEnrolled ? 'var(--pd-ink)' : $color }}; border: 1px solid {{ $color }}33;"
+                            >
+                                {{ $ctaLabel }}
+                                <svg viewBox="0 0 16 16" class="h-4 w-4 fill-none stroke-current stroke-[2.2] transition-transform duration-300 group-hover:translate-x-1"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+                            </a>
                         </div>
                     </article>
                 @empty
@@ -377,4 +383,3 @@
 
     </div>
 </x-member-layout>
-
