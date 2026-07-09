@@ -159,6 +159,19 @@
                                     <span class="text-xs text-boss-gold/80">18+ age confirmed</span>
                                 </div>
                             </template>
+                            <template x-if="selected.terms_accepted_at">
+                                <div class="mt-3 flex items-start gap-2">
+                                    <svg class="mt-0.5 h-3.5 w-3.5 text-green-300" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                                    </svg>
+                                    <span class="text-xs leading-5 text-green-200/75">
+                                        Terms accepted <span x-text="selected.terms_accepted_at"></span>
+                                        <template x-if="selected.terms_version">
+                                            <span> &middot; Version <span x-text="selected.terms_version"></span></span>
+                                        </template>
+                                    </span>
+                                </div>
+                            </template>
                         </div>
 
                         {{-- Message / motivation --}}
@@ -339,13 +352,23 @@
                 <p class="pd-kicker">{{ __('Recruitment') }}</p>
                 <h1 class="pd-heading mt-2 text-[clamp(2rem,4vw,2.6rem)]">{{ __('Applications') }}</h1>
             </div>
-            <a href="{{ route('admin.applications.export') }}" class="pd-btn-secondary h-11 w-fit gap-2">
-                <svg class="h-4 w-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7">
-                    <path d="M8 2v8m0 0 3-3m-3 3L5 7"/>
-                    <path d="M3 12.5h10"/>
-                </svg>
-                {{ __('Download CRM CSV') }}
-            </a>
+            <div class="flex flex-wrap items-center gap-2">
+                <form method="GET" action="{{ route('admin.applications.index') }}">
+                    <label for="applications-per-page" class="sr-only">{{ __('Rows per page') }}</label>
+                    <select id="applications-per-page" name="per_page" class="pd-input h-11 w-auto min-w-28" onchange="this.form.submit()">
+                        @foreach ([10, 20, 50] as $size)
+                            <option value="{{ $size }}" @selected($perPage === $size)>{{ $size }} {{ __('rows') }}</option>
+                        @endforeach
+                    </select>
+                </form>
+                <a href="{{ route('admin.applications.export') }}" class="pd-btn-secondary h-11 w-fit gap-2">
+                    <svg class="h-4 w-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7">
+                        <path d="M8 2v8m0 0 3-3m-3 3L5 7"/>
+                        <path d="M3 12.5h10"/>
+                    </svg>
+                    {{ __('Download CRM CSV') }}
+                </a>
+            </div>
         </header>
 
         {{-- Flash messages --}}
@@ -386,7 +409,7 @@
                         <p class="mt-2 text-sm text-boss-ivory/42">{{ __('Member-submitted referrals waiting to become applications.') }}</p>
                     </div>
                     <span class="rounded-full border border-boss-gold/15 bg-boss-gold/[0.07] px-3 py-1.5 text-[0.65rem] uppercase tracking-[0.14em] text-boss-gold">
-                        {{ $referralLeads->count() }} {{ __('leads') }}
+                        {{ number_format($referralLeads->total()) }} {{ __('leads') }}
                     </span>
                 </div>
 
@@ -447,6 +470,10 @@
                         </article>
                     @endforeach
                 </div>
+
+                @if ($referralLeads->hasPages())
+                    <div class="mt-5 border-t border-white/[0.06] pt-4">{{ $referralLeads->links() }}</div>
+                @endif
             </section>
         @endif
 
@@ -473,6 +500,8 @@
                                     'experience_level'     => $application->experience_level,
                                     'social_handle'        => $application->social_handle,
                                     'age_confirmed'        => $application->age_confirmed,
+                                    'terms_accepted_at'    => $application->terms_accepted_at?->toDayDateTimeString(),
+                                    'terms_version'        => $application->terms_version,
                                     'status'               => $application->status,
                                     'referrer_name'        => $application->referral?->referrer?->name,
                                     'referral_status'      => $application->referral?->status,
@@ -526,6 +555,9 @@
                                                 @if ($application->age_confirmed)
                                                     <span class="rounded-full bg-boss-gold/10 px-2 py-0.5 text-[0.62rem] text-boss-gold">18+</span>
                                                 @endif
+                                                @if ($application->terms_accepted_at)
+                                                    <span class="rounded-full bg-green-400/10 px-2 py-0.5 text-[0.62rem] text-green-300">{{ __('Terms accepted') }}</span>
+                                                @endif
                                                 @if ($application->photo_paths)
                                                     <span class="rounded-full bg-white/[0.04] px-2 py-0.5 text-[0.62rem] text-boss-ivory/35">
                                                         {{ count($application->photo_paths) }} {{ count($application->photo_paths) === 1 ? 'photo' : 'photos' }}
@@ -573,7 +605,18 @@
             </div>
         </div>
 
-        <div class="px-2">{{ $applications->links() }}</div>
+        <div class="flex flex-col gap-3 px-2 sm:flex-row sm:items-center sm:justify-between">
+            <p class="text-xs text-boss-ivory/35">
+                @if ($applications->total() > 0)
+                    {{ __('Showing') }} {{ $applications->firstItem() }}-{{ $applications->lastItem() }} {{ __('of') }} {{ number_format($applications->total()) }} {{ __('applications') }}
+                @else
+                    {{ __('No applications') }}
+                @endif
+            </p>
+            @if ($applications->hasPages())
+                {{ $applications->links() }}
+            @endif
+        </div>
 
     </div>
 </x-admin-layout>

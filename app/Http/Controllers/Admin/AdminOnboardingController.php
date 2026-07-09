@@ -13,6 +13,8 @@ use App\Models\CourseAccessRequestFile;
 use App\Models\ModelProfile;
 use App\Models\User;
 use App\Notifications\SystemNotification;
+use App\Services\AdminActivityNotifier;
+use App\Support\OnboardingFormDefinition;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -26,18 +28,16 @@ use Throwable;
 
 class AdminOnboardingController extends Controller
 {
-    public function index(): View
+    public function index(Request $request): View
     {
+        $perPage = $this->perPage($request);
+
         $models = User::query()
             ->where('role', 'model')
             ->with('modelProfile')
             ->orderBy('name')
-            ->paginate(20);
-
-        $stageOptions = collect(ModelProfile::onboardingStageOptions())
-            ->map(fn (string $label, string $value) => ['value' => $value, 'label' => $label])
-            ->values()
-            ->all();
+            ->paginate($perPage)
+            ->withQueryString();
 
         $stats = [
             'members' => User::where('role', 'model')->count(),
@@ -48,7 +48,28 @@ class AdminOnboardingController extends Controller
             'role_assigned' => ModelProfile::whereNotNull('community_role_assigned_at')->count(),
         ];
 
-        return view('admin.onboarding.index', compact('models', 'stageOptions', 'stats'));
+        return view('admin.onboarding.index', [
+            'models' => $models,
+            'perPage' => $perPage,
+            'stats' => $stats,
+            'onboardingForm' => OnboardingFormDefinition::get(),
+            'customFieldTypes' => [
+                'text' => __('Text input'),
+                'textarea' => __('Long text'),
+                'select' => __('Dropdown'),
+                'radio' => __('Single choice'),
+                'checkbox' => __('Checkbox group'),
+                'yes_no_maybe' => __('Yes / No / Maybe'),
+                'section' => __('Help text only'),
+            ],
+        ]);
+    }
+
+    private function perPage(Request $request): int
+    {
+        $perPage = (int) $request->query('per_page', 20);
+
+        return in_array($perPage, [10, 20, 50], true) ? $perPage : 20;
     }
 
     public function show(ModelProfile $profile): View
@@ -74,7 +95,10 @@ class AdminOnboardingController extends Controller
             'courses'               => $courses,
             'unlockedCourseIds'     => $unlockedCourseIds,
             'accessRequestsByCourse' => $accessRequestsByCourse,
-            'stageOptions'          => ModelProfile::onboardingStageOptions(),
+            'customOnboardingAnswers' => OnboardingFormDefinition::customAnswersForDisplay(
+                OnboardingFormDefinition::get(),
+                $profile->custom_onboarding_answers ?? []
+            ),
         ]);
     }
 
@@ -156,6 +180,19 @@ class AdminOnboardingController extends Controller
         ])->save();
 
         return redirect()->back()->with('status', __('Verification instructions saved.'));
+    }
+
+    public function updateOnboardingForm(Request $request): RedirectResponse
+    {
+        $request->validate([
+            'form' => ['nullable', 'array'],
+        ]);
+
+        OnboardingFormDefinition::saveFromRequest($request);
+
+        return redirect()
+            ->route('admin.onboarding.index')
+            ->with('status', __('Onboarding form saved. Future model onboarding forms will use the updated version.'));
     }
 
     public function unlockCourse(ModelProfile $profile, Course $course): RedirectResponse
@@ -306,7 +343,9 @@ class AdminOnboardingController extends Controller
         $this->sendMail($profile, new AccountApprovalMail(
             profile: $profile,
             dashboardUrl: route('member.dashboard'),
+            whatsappCommunityUrl: config('paradise.whatsapp_community_url'),
         ));
+        $this->notifyAdminOfVerificationApproval($profile);
 
         return redirect()->back()->with('status', __('Account Approval Email sent and member marked verified.'));
     }
@@ -362,6 +401,7 @@ class AdminOnboardingController extends Controller
         $this->sendMail($profile, new CommunityAccessMail(
             profile: $profile,
             communityUrl: $communityUrl,
+            whatsappCommunityUrl: config('paradise.whatsapp_community_url'),
             roleName: config('paradise.community_role_name'),
         ));
 
@@ -485,6 +525,24 @@ class AdminOnboardingController extends Controller
         } catch (Throwable $e) {
             report($e);
         }
+    }
+
+    private function notifyAdminOfVerificationApproval(ModelProfile $profile): void
+    {
+        app(AdminActivityNotifier::class)->notify(
+            title: __('Account verified'),
+            body: __(':name has been verified and is ready for course/community access review.', ['name' => $profile->user->name]),
+            actionUrl: route('admin.onboarding.show', ['profile' => $profile], false),
+            category: 'account_verified',
+            emailSubject: __('Account verified: :name', ['name' => $profile->user->name]),
+            details: [
+                __('Member') => $profile->user->name,
+                __('Email') => $profile->user->email,
+                __('Reviewed by') => auth()->user()?->name,
+                __('Reviewed at') => $profile->verification_reviewed_at?->toDayDateTimeString(),
+            ],
+            actionLabel: __('Open verified profile'),
+        );
     }
 
     private function validatedCommunityInviteUrl(Request $request): string

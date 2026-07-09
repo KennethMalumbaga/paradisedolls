@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Mail\AccountApprovalMail;
+use App\Mail\AdminActivityAlertMail;
 use App\Mail\ApplicationSubmittedMail;
 use App\Mail\CommunityAccessMail;
 use App\Mail\MemberApplicationApprovedMail;
@@ -16,6 +17,7 @@ use App\Models\ModelApplication;
 use App\Models\ModelProfile;
 use App\Models\ModelReferral;
 use App\Models\User;
+use App\Support\OnboardingFormDefinition;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Hash;
@@ -32,6 +34,8 @@ class OnboardingFlowTest extends TestCase
         Mail::fake();
         Storage::fake('local');
 
+        $admin = User::factory()->create(['role' => 'admin']);
+
         $this->post(route('apply.store'), [
             'name' => 'Kayla Test',
             'email' => 'kayla@example.com',
@@ -41,6 +45,7 @@ class OnboardingFlowTest extends TestCase
             'social_handle' => '@kayla',
             'message' => 'I want to build remote income.',
             'age_confirmed' => '1',
+            'terms_accepted' => '1',
             'photos' => [
                 $this->fakePng('photo-one.png'),
             ],
@@ -50,9 +55,41 @@ class OnboardingFlowTest extends TestCase
 
         $this->assertNotNull($application);
         $this->assertSame('+639123456789', $application->phone);
+        $this->assertNotNull($application->terms_accepted_at);
+        $this->assertSame(ModelApplication::TERMS_VERSION, $application->terms_version);
         $this->assertCount(1, $application->photo_paths);
         Storage::disk('local')->assertExists($application->photo_paths[0]);
+        $this->assertSame('application_submitted', $admin->notifications()->first()?->data['category']);
         Mail::assertSent(ApplicationSubmittedMail::class);
+    }
+
+    public function test_admin_is_notified_when_member_begins_onboarding(): void
+    {
+        Mail::fake();
+
+        $admin = User::factory()->create(['role' => 'admin']);
+        $member = User::factory()->create([
+            'name' => 'Starter Model',
+            'email' => 'starter@example.com',
+            'role' => 'model',
+        ]);
+
+        $this->actingAs($member)
+            ->get(route('member.onboarding.edit'))
+            ->assertOk();
+
+        $profile = $member->modelProfile()->first();
+
+        $this->assertNotNull($profile?->onboarding_started_at);
+        $this->assertSame('onboarding_started', $admin->notifications()->first()?->data['category']);
+        Mail::assertQueued(AdminActivityAlertMail::class, fn (AdminActivityAlertMail $mail) => $mail->subjectLine === 'Onboarding started: Starter Model');
+
+        $this->actingAs($member)
+            ->get(route('member.onboarding.edit'))
+            ->assertOk();
+
+        $this->assertSame(1, $admin->notifications()->count());
+        Mail::assertQueued(AdminActivityAlertMail::class, 1);
     }
 
     public function test_application_submission_rejects_photos_larger_than_ten_megabytes(): void
@@ -67,6 +104,7 @@ class OnboardingFlowTest extends TestCase
             'phone_number' => '912 345 6789',
             'experience_level' => 'beginner',
             'age_confirmed' => '1',
+            'terms_accepted' => '1',
             'photos' => [
                 $this->fakeLargePng('large-photo.png'),
             ],
@@ -87,7 +125,25 @@ class OnboardingFlowTest extends TestCase
             'phone_number' => 'call me maybe',
             'experience_level' => 'beginner',
             'age_confirmed' => '1',
+            'terms_accepted' => '1',
         ])->assertSessionHasErrors('phone_number');
+
+        $this->assertDatabaseCount('model_applications', 0);
+        Mail::assertNothingSent();
+    }
+
+    public function test_application_submission_requires_terms_acceptance(): void
+    {
+        Mail::fake();
+
+        $this->post(route('apply.store'), [
+            'name' => 'Kayla Test',
+            'email' => 'kayla@example.com',
+            'phone_country' => 'PH',
+            'phone_number' => '912 345 6789',
+            'experience_level' => 'beginner',
+            'age_confirmed' => '1',
+        ])->assertSessionHasErrors('terms_accepted');
 
         $this->assertDatabaseCount('model_applications', 0);
         Mail::assertNothingSent();
@@ -104,6 +160,7 @@ class OnboardingFlowTest extends TestCase
             'phone_number' => '555 1234',
             'experience_level' => 'beginner',
             'age_confirmed' => '1',
+            'terms_accepted' => '1',
         ])->assertRedirect(route('home').'#apply');
 
         $this->assertSame('+18295551234', ModelApplication::first()?->phone);
@@ -120,6 +177,7 @@ class OnboardingFlowTest extends TestCase
             'phone_number' => '912 345 6789',
             'experience_level' => 'beginner',
             'age_confirmed' => '1',
+            'terms_accepted' => '1',
         ])->assertSessionHasErrors('email');
 
         $this->assertDatabaseCount('model_applications', 0);
@@ -395,6 +453,42 @@ class OnboardingFlowTest extends TestCase
             ->assertSee(route('admin.applications.resend-approval-email', $application), false);
     }
 
+    public function test_admin_can_see_application_photos_on_onboarding_profile(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+        $member = User::factory()->create([
+            'name' => 'Photo Model',
+            'email' => 'photo-model@example.com',
+            'role' => 'model',
+        ]);
+        $application = ModelApplication::create([
+            'name' => 'Photo Model',
+            'email' => 'photo-model@example.com',
+            'experience_level' => 'beginner',
+            'age_confirmed' => true,
+            'photo_paths' => [
+                'applications/photos/photo-one.jpg',
+                'applications/photos/photo-two.jpg',
+            ],
+        ]);
+        $application->forceFill([
+            'status' => ModelApplication::STATUS_APPROVED,
+            'user_id' => $member->id,
+        ])->save();
+        $profile = ModelProfile::create([
+            'user_id' => $member->id,
+            'model_application_id' => $application->id,
+        ]);
+
+        $this->actingAs($admin)
+            ->get(route('admin.onboarding.show', $profile))
+            ->assertOk()
+            ->assertSeeText('Application Photos')
+            ->assertSeeText('2 photos')
+            ->assertSee(route('admin.applications.photos.view', [$application, 0]), false)
+            ->assertSee(route('admin.applications.photos.show', [$application, 1]), false);
+    }
+
     public function test_admin_does_not_see_resend_application_approval_email_action_after_onboarding_is_submitted(): void
     {
         $admin = User::factory()->create(['role' => 'admin']);
@@ -509,7 +603,171 @@ class OnboardingFlowTest extends TestCase
             ->get(route('admin.onboarding.show', $profile))
             ->assertOk()
             ->assertSee('Delete member account')
-            ->assertSee(route('admin.models.destroy', $member), false);
+            ->assertDontSee('Onboarding stage')
+            ->assertSee(route('admin.models.destroy', $member), false)
+            ->assertSee('confirm-onboarding-member-deletion')
+            ->assertSeeText('Delete member account?')
+            ->assertDontSee('return confirm(', false);
+    }
+
+    public function test_member_onboarding_shows_expanded_platform_website_options(): void
+    {
+        $member = User::factory()->create(['role' => 'model']);
+
+        $this->actingAs($member)
+            ->get(route('member.onboarding.edit'))
+            ->assertOk()
+            ->assertSee('AdultWork')
+            ->assertSee('Stripchat')
+            ->assertSee('Chaturbate')
+            ->assertSee('Babestation')
+            ->assertSee('LiveJasmin')
+            ->assertSee('BongaCams')
+            ->assertSee('CamSoda')
+            ->assertSee('MyFreeCams')
+            ->assertSee('Streamate')
+            ->assertSee('Fansly')
+            ->assertSee('ManyVids')
+            ->assertSee('Clips4Sale');
+    }
+
+    public function test_admin_onboarding_page_exposes_inline_form_editor(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+
+        $this->actingAs($admin)
+            ->get(route('admin.onboarding.index'))
+            ->assertOk()
+            ->assertSee('Edit Onboarding Form')
+            ->assertSee('Custom Questions')
+            ->assertSee(route('admin.onboarding.form.update'), false)
+            ->assertDontSee('/admin/onboarding-form');
+    }
+
+    public function test_admin_can_update_onboarding_options_and_member_form_uses_them(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+        $member = User::factory()->create(['role' => 'model']);
+
+        $this->actingAs($admin)
+            ->put(route('admin.onboarding.form.update'), [
+                'form' => [
+                    'option_groups' => [
+                        'platforms_cam' => [
+                            'label' => 'Cam Sites',
+                            'help' => 'Choose every cam platform that applies.',
+                            'options' => "CAM4\nDreamCam",
+                        ],
+                    ],
+                ],
+            ])
+            ->assertRedirect(route('admin.onboarding.index'));
+
+        $definition = OnboardingFormDefinition::get();
+
+        $this->assertContains('DreamCam', $definition['option_groups']['platforms_cam']['options']);
+        $this->assertContains('AdultWork', $definition['option_groups']['platforms_cam']['archived']);
+
+        $this->actingAs($member)
+            ->get(route('member.onboarding.edit'))
+            ->assertOk()
+            ->assertSee('DreamCam')
+            ->assertSee('Choose every cam platform that applies.')
+            ->assertDontSee('AdultWork');
+    }
+
+    public function test_required_custom_onboarding_question_is_validated_and_saved(): void
+    {
+        Mail::fake();
+
+        $admin = User::factory()->create(['role' => 'admin']);
+        $member = User::factory()->create(['role' => 'model']);
+
+        $this->actingAs($admin)
+            ->put(route('admin.onboarding.form.update'), [
+                'form' => [
+                    'custom_fields' => [
+                        [
+                            'label' => 'Preferred content style',
+                            'type' => 'text',
+                            'help' => 'Tell us what style feels natural.',
+                            'required' => '1',
+                            'archived' => '0',
+                        ],
+                    ],
+                ],
+            ])
+            ->assertRedirect(route('admin.onboarding.index'));
+
+        $this->actingAs($member)
+            ->get(route('member.onboarding.edit'))
+            ->assertOk()
+            ->assertSee('Preferred content style')
+            ->assertSee('Tell us what style feels natural.');
+
+        $this->actingAs($member)
+            ->put(route('member.onboarding.update'), $this->validOnboardingPayload())
+            ->assertSessionHasErrors('custom_onboarding.custom_preferred_content_style');
+
+        $this->actingAs($member)
+            ->put(route('member.onboarding.update'), $this->validOnboardingPayload([
+                'custom_onboarding' => [
+                    'custom_preferred_content_style' => 'Soft glam and lifestyle.',
+                ],
+            ]))
+            ->assertRedirect(route('member.verification.edit'));
+
+        $profile = $member->modelProfile()->first();
+
+        $this->assertSame('Soft glam and lifestyle.', $profile->custom_onboarding_answers['custom_preferred_content_style'] ?? null);
+        $this->assertSame(OnboardingFormDefinition::get()['version'], $profile->onboarding_form_version);
+
+        $this->actingAs($admin)
+            ->get(route('admin.onboarding.show', $profile))
+            ->assertOk()
+            ->assertSee('Preferred content style')
+            ->assertSee('Soft glam and lifestyle.');
+    }
+
+    public function test_archived_custom_fields_hide_from_member_form_but_old_answers_remain_visible(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+        $member = User::factory()->create(['role' => 'model']);
+        $profile = ModelProfile::create([
+            'user_id' => $member->id,
+            'custom_onboarding_answers' => [
+                'custom_legacy_question' => 'Legacy answer',
+            ],
+        ]);
+
+        $this->actingAs($admin)
+            ->put(route('admin.onboarding.form.update'), [
+                'form' => [
+                    'custom_fields' => [
+                        [
+                            'id' => 'custom_legacy_question',
+                            'label' => 'Legacy question',
+                            'type' => 'text',
+                            'help' => '',
+                            'required' => '0',
+                            'archived' => '1',
+                        ],
+                    ],
+                ],
+            ])
+            ->assertRedirect(route('admin.onboarding.index'));
+
+        $this->actingAs($member)
+            ->get(route('member.onboarding.edit'))
+            ->assertOk()
+            ->assertDontSee('Legacy question');
+
+        $this->actingAs($admin)
+            ->get(route('admin.onboarding.show', $profile))
+            ->assertOk()
+            ->assertSee('Legacy question')
+            ->assertSee('Legacy answer')
+            ->assertSee('Archived');
     }
 
     public function test_member_can_submit_information_and_verification_documents(): void
@@ -529,7 +787,7 @@ class OnboardingFlowTest extends TestCase
                 'country' => 'United Kingdom',
                 'city' => 'London',
                 'timezone' => 'Europe/London',
-                'platforms' => ['CAM4', 'OnlyFans'],
+                'platforms' => ['AdultWork', 'CAM4', 'OnlyFans', 'Stripchat', 'Fansly'],
                 'equipment' => ['Phone', 'Ring light'],
                 'availability' => 'Evenings and weekends.',
                 'goals' => 'Build a consistent online income.',
@@ -546,9 +804,10 @@ class OnboardingFlowTest extends TestCase
         $this->assertNotNull($profile->information_submitted_at);
         $this->assertSame('+447700900555', $profile->phone);
         $this->assertSame('+639854747065', $profile->emergency_contact_phone);
-        $this->assertSame(['CAM4', 'OnlyFans'], $profile->platforms);
+        $this->assertSame(['AdultWork', 'CAM4', 'OnlyFans', 'Stripchat', 'Fansly'], $profile->platforms);
         $this->assertSame('stage-name', $profile->discord_username);
         Mail::assertQueued(ModelInformationSubmittedMail::class);
+        Mail::assertQueued(AdminActivityAlertMail::class, fn (AdminActivityAlertMail $mail) => $mail->subjectLine === 'Onboarding form completed: '.$member->name);
 
         $this->actingAs($member)
             ->post(route('member.verification.store'), [
@@ -563,6 +822,7 @@ class OnboardingFlowTest extends TestCase
         Storage::disk('local')->assertExists($profile->id_document_path);
         Storage::disk('local')->assertExists($profile->selfie_with_id_path);
         Mail::assertQueued(VerificationSubmissionReceivedMail::class);
+        Mail::assertQueued(AdminActivityAlertMail::class, fn (AdminActivityAlertMail $mail) => $mail->subjectLine === 'Verification ID uploaded: '.$member->name);
 
         $this->actingAs($member)
             ->get(route('member.dashboard'))
@@ -738,7 +998,9 @@ class OnboardingFlowTest extends TestCase
         $this->actingAs($admin)
             ->get(route('admin.onboarding.index'))
             ->assertOk()
-            ->assertSeeText('Discord Invites');
+            ->assertSeeText('Discord Invites')
+            ->assertDontSee('Manual Access Controls')
+            ->assertDontSee('Current phase');
     }
 
     public function test_admin_can_approve_existing_documents_after_a_reverification_request(): void
@@ -1141,6 +1403,22 @@ class OnboardingFlowTest extends TestCase
         $this->actingAs($member)
             ->get(route('community.show'))
             ->assertOk();
+    }
+
+    private function validOnboardingPayload(array $overrides = []): array
+    {
+        return array_replace_recursive([
+            'legal_name' => 'Legal Name',
+            'stage_name' => 'Stage Name',
+            'date_of_birth' => now()->subYears(21)->format('Y-m-d'),
+            'phone_country' => 'GB',
+            'phone_number' => '7700 900555',
+            'country' => 'United Kingdom',
+            'city' => 'London',
+            'timezone' => 'Europe/London',
+            'availability' => 'Evenings and weekends.',
+            'goals' => 'Build a consistent online income.',
+        ], $overrides);
     }
 
     private function fakePng(string $name): UploadedFile

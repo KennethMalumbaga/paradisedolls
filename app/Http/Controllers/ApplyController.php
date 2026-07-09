@@ -6,6 +6,7 @@ use App\Mail\ApplicationSubmittedMail;
 use App\Models\ModelApplication;
 use App\Models\ModelReferral;
 use App\Models\User;
+use App\Services\AdminActivityNotifier;
 use App\Support\CountryCallingCodes;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -40,6 +41,7 @@ class ApplyController extends Controller
             'photos' => ['nullable', 'array', 'max:6'],
             'photos.*' => ['image', 'mimes:jpg,jpeg,png,webp', 'max:10240'],
             'age_confirmed' => ['accepted'],
+            'terms_accepted' => ['accepted'],
             'referral_code' => ['nullable', 'string', 'max:32'],
         ], [
             'email.email' => __('Please enter a valid email address, like name@example.com.'),
@@ -48,6 +50,7 @@ class ApplyController extends Controller
             'photos.max' => __('Please upload up to 6 photos only.'),
             'photos.*.max' => __('Each photo must be 10 MB or smaller.'),
             'photos.*.mimes' => __('Photos must be JPG, PNG, or WEBP files.'),
+            'terms_accepted.accepted' => __('Please confirm that you have read and agree to the Paradise Dolls Terms & Conditions.'),
         ]);
 
         $validator->after(function ($validator) use ($request): void {
@@ -98,6 +101,8 @@ class ApplyController extends Controller
             'experience_level' => $validated['experience_level'],
             'social_handle' => $socialHandle,
             'age_confirmed' => true,
+            'terms_accepted_at' => now(),
+            'terms_version' => ModelApplication::TERMS_VERSION,
             'photo_paths' => $photoPaths,
         ]);
 
@@ -127,6 +132,14 @@ class ApplyController extends Controller
 
     private function notifyOnboardingTeam(ModelApplication $application): void
     {
+        app(AdminActivityNotifier::class)->notify(
+            title: __('New application submitted'),
+            body: __(':name submitted a new Paradise Dolls application.', ['name' => $application->name]),
+            actionUrl: route('admin.applications.index', absolute: false),
+            category: 'application_submitted',
+            sendEmail: false,
+        );
+
         $email = config('paradise.onboarding_email');
 
         if (! filled($email)) {

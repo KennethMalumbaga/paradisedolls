@@ -25,9 +25,6 @@
                 <a href="{{ route('admin.onboarding.export-profile', $profile) }}" class="rounded-xl border border-boss-gold/20 bg-boss-gold/[0.07] px-3 py-1.5 text-[0.72rem] font-semibold text-boss-gold transition hover:bg-boss-gold/[0.13]">
                     {{ __('Download CRM Excel') }}
                 </a>
-                <span class="rounded-full border border-white/[0.08] bg-white/[0.04] px-3 py-1 text-[0.72rem] text-boss-ivory/60">
-                    {{ $profile->onboardingStageLabel() }}
-                </span>
                 <span class="rounded-full bg-boss-gold/10 px-3 py-1 text-[0.72rem] font-semibold text-boss-gold">
                     {{ $profile->onboardingPercent() }}% complete
                 </span>
@@ -49,6 +46,13 @@
                         <p class="mt-2 select-all break-all font-mono text-base font-semibold tracking-wide">{{ session('approval_fallback_password') }}</p>
                     </div>
                 @endif
+                @if (session('manual_login_password'))
+                    <div class="rounded-xl border border-amber-300/25 bg-boss-ink px-4 py-3 text-boss-ivory">
+                        <p class="text-[0.65rem] uppercase tracking-[0.14em] text-amber-200/60">{{ __('Manual temporary password') }}</p>
+                        <p class="mt-1 text-xs text-boss-ivory/40">{{ session('manual_login_email') }}</p>
+                        <p class="mt-2 select-all break-all font-mono text-base font-semibold tracking-wide">{{ session('manual_login_password') }}</p>
+                    </div>
+                @endif
             </div>
         @endif
         @if ($errors->any())
@@ -58,6 +62,12 @@
         @endif
 
         {{-- ── Onboarding progress timeline ────────────────────────── --}}
+        @php
+            $applicationPhotos = $profile->application
+                ? collect($profile->application->photo_paths ?? [])->filter()->values()
+                : collect();
+        @endphp
+
         <section class="pd-panel-strong p-5">
             <p class="mb-4 text-[0.66rem] uppercase tracking-[0.18em] text-boss-ivory/35">{{ __('Onboarding Progress') }}</p>
             <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
@@ -120,6 +130,43 @@
                         @endforeach
                     </div>
                 </section>
+
+                {{-- Application Photos --}}
+                @if ($profile->application && $applicationPhotos->isNotEmpty())
+                    <section class="pd-panel-strong p-5">
+                        <div class="mb-4 flex flex-wrap items-center justify-between gap-2">
+                            <p class="text-[0.66rem] uppercase tracking-[0.18em] text-boss-ivory/35">{{ __('Application Photos') }}</p>
+                            <span class="rounded-full bg-white/[0.04] px-2.5 py-0.5 text-[0.68rem] text-boss-ivory/42">
+                                {{ $applicationPhotos->count() }} {{ $applicationPhotos->count() === 1 ? __('photo') : __('photos') }}
+                            </span>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                            @foreach ($applicationPhotos as $index => $path)
+                                <div class="overflow-hidden rounded-xl border border-white/[0.06] bg-white/[0.025]">
+                                    <a href="{{ route('admin.applications.photos.view', [$profile->application, $index]) }}" target="_blank" rel="noopener" class="block aspect-[4/5] bg-white/[0.03]">
+                                        <img
+                                            src="{{ route('admin.applications.photos.view', [$profile->application, $index]) }}"
+                                            alt="{{ __('Application photo :number', ['number' => $index + 1]) }}"
+                                            class="h-full w-full object-cover"
+                                            loading="lazy"
+                                        >
+                                    </a>
+                                    <div class="flex items-center justify-between gap-2 border-t border-white/[0.06] px-3 py-2">
+                                        <span class="text-[0.68rem] text-boss-ivory/38">{{ __('Photo :number', ['number' => $index + 1]) }}</span>
+                                        <div class="flex shrink-0 gap-2">
+                                            <a href="{{ route('admin.applications.photos.view', [$profile->application, $index]) }}" target="_blank" rel="noopener" class="text-[0.68rem] font-medium text-boss-gold transition hover:text-boss-gold-light">
+                                                {{ __('View') }}
+                                            </a>
+                                            <a href="{{ route('admin.applications.photos.show', [$profile->application, $index]) }}" class="text-[0.68rem] text-boss-ivory/35 transition hover:text-boss-ivory/65">
+                                                {{ __('Download') }}
+                                            </a>
+                                        </div>
+                                    </div>
+                                </div>
+                            @endforeach
+                        </div>
+                    </section>
+                @endif
 
                 {{-- Appearance & Style --}}
                 @if ($profile->height || $profile->weight || $profile->hair_color || $profile->eye_color || $profile->body_type || $profile->has_tattoos_piercings)
@@ -259,7 +306,7 @@
                 @endif
 
                 {{-- Payout Information --}}
-                @if ($profile->payout_methods || $profile->payout_method_other || $profile->payout_country)
+                @if ($profile->payout_methods || $profile->payout_method_other || $profile->payout_country || $profile->payout_account_name || $profile->payout_bank_name || $profile->payout_sort_code || $profile->payout_account_number || $profile->payout_iban)
                     <section class="pd-panel-strong p-5">
                         <p class="mb-4 text-[0.66rem] uppercase tracking-[0.18em] text-boss-ivory/35">{{ __('Payout Information') }}</p>
                         <div class="space-y-3">
@@ -277,6 +324,24 @@
                                 <div class="text-[0.82rem]">
                                     <p class="text-[0.62rem] uppercase tracking-[0.1em] text-boss-ivory/28">Country / Region</p>
                                     <p class="mt-0.5 text-boss-ivory/75">{{ $profile->payout_country }}</p>
+                                </div>
+                            @endif
+                            @if ($profile->payout_account_name || $profile->payout_bank_name || $profile->payout_sort_code || $profile->payout_account_number || $profile->payout_iban)
+                                <div class="grid gap-3 border-t border-white/[0.06] pt-3 sm:grid-cols-2">
+                                    @foreach ([
+                                        ['Name on account', $profile->payout_account_name],
+                                        ['Name of bank', $profile->payout_bank_name],
+                                        ['Sort code', $profile->payout_sort_code],
+                                        ['Account number', $profile->payout_account_number],
+                                        ['IBAN', $profile->payout_iban],
+                                    ] as [$label, $value])
+                                        @if (filled($value))
+                                            <div class="text-[0.82rem] {{ $label === 'IBAN' ? 'sm:col-span-2' : '' }}">
+                                                <p class="text-[0.62rem] uppercase tracking-[0.1em] text-boss-ivory/28">{{ __($label) }}</p>
+                                                <p class="mt-0.5 break-all text-boss-ivory/75">{{ $value }}</p>
+                                            </div>
+                                        @endif
+                                    @endforeach
                                 </div>
                             @endif
                         </div>
@@ -300,6 +365,25 @@
                                     <p class="whitespace-pre-line text-[0.82rem] leading-relaxed text-boss-ivory/70">{{ $profile->anything_else }}</p>
                                 </div>
                             @endif
+                        </div>
+                    </section>
+                @endif
+
+                @if (! empty($customOnboardingAnswers))
+                    <section class="pd-panel-strong p-5">
+                        <p class="mb-4 text-[0.66rem] uppercase tracking-[0.18em] text-boss-ivory/35">{{ __('Custom Onboarding Answers') }}</p>
+                        <div class="space-y-3">
+                            @foreach ($customOnboardingAnswers as $answer)
+                                <div class="rounded-xl border border-white/[0.06] bg-white/[0.025] p-3">
+                                    <div class="flex flex-wrap items-center gap-2">
+                                        <p class="text-[0.62rem] uppercase tracking-[0.1em] text-boss-ivory/28">{{ $answer['label'] }}</p>
+                                        @if ($answer['archived'])
+                                            <span class="rounded-full bg-white/[0.05] px-2 py-0.5 text-[0.58rem] text-boss-ivory/30">{{ __('Archived') }}</span>
+                                        @endif
+                                    </div>
+                                    <p class="mt-1 whitespace-pre-line text-[0.82rem] leading-relaxed text-boss-ivory/72">{{ $answer['answer'] }}</p>
+                                </div>
+                            @endforeach
                         </div>
                     </section>
                 @endif
@@ -355,20 +439,6 @@
                 {{-- Admin Actions --}}
                 <section class="pd-panel-strong p-5">
                     <p class="mb-4 text-[0.66rem] uppercase tracking-[0.18em] text-boss-ivory/35">{{ __('Admin Actions') }}</p>
-
-                    {{-- Onboarding stage --}}
-                    <form action="{{ route('admin.onboarding.stage', $profile) }}" method="POST" class="mb-4">
-                        @csrf
-                        <label class="mb-1 block text-[0.7rem] text-boss-ivory/40">{{ __('Onboarding stage') }}</label>
-                        <div class="flex gap-2">
-                            <select name="onboarding_stage" class="pd-input flex-1 text-sm">
-                                @foreach ($stageOptions as $value => $label)
-                                    <option value="{{ $value }}" @selected($profile->onboarding_stage === $value || (! $profile->onboarding_stage && $value === \App\Models\ModelProfile::STAGE_REGISTRATION))>{{ $label }}</option>
-                                @endforeach
-                            </select>
-                            <button type="submit" class="shrink-0 rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-[0.75rem] font-medium text-boss-ivory/70 transition hover:bg-white/[0.07] hover:text-boss-ivory">Save</button>
-                        </div>
-                    </form>
 
                     <div class="space-y-2">
                         @if ($profile->application?->canResendApprovalEmail())
@@ -445,21 +515,62 @@
                             <p class="py-2 text-center text-sm text-green-300/70">{{ __('Fully onboarded ✓') }}</p>
                         @endif
                     </div>
-                    <form
-                        action="{{ route('admin.models.destroy', $user) }}"
-                        method="POST"
-                        class="mt-5 border-t border-red-300/10 pt-4"
-                        onsubmit="return confirm('{{ __('Delete this member account? This permanently removes their login, onboarding profile, uploaded files, course progress, and linked application.') }}');"
-                    >
-                        @csrf
-                        @method('DELETE')
-                        <input type="hidden" name="confirm_member_delete" value="1">
-                        <button type="submit" class="w-full rounded-xl border border-red-300/15 bg-red-400/10 px-4 py-2.5 text-sm font-semibold text-red-200 transition hover:border-red-300/35 hover:bg-red-400/15">
+                    <div class="mt-5 border-t border-red-300/10 pt-4">
+                        <button
+                            type="button"
+                            x-data=""
+                            @click.prevent="$dispatch('open-modal', 'confirm-onboarding-member-deletion')"
+                            class="w-full rounded-xl border border-red-300/15 bg-red-400/10 px-4 py-2.5 text-sm font-semibold text-red-200 transition hover:border-red-300/35 hover:bg-red-400/15"
+                        >
                             {{ __('Delete member account') }}
                         </button>
                         <p class="mt-2 text-center text-[0.68rem] leading-relaxed text-boss-ivory/28">
                             {{ __('Permanent removal for this model account and its onboarding records.') }}
                         </p>
+                    </div>
+                </section>
+
+                {{-- Login Access --}}
+                <section class="pd-panel-strong p-5">
+                    <p class="mb-3 text-[0.66rem] uppercase tracking-[0.18em] text-boss-ivory/35">{{ __('Login Access') }}</p>
+                    <form action="{{ route('admin.models.login.update', $user) }}" method="POST" class="space-y-3">
+                        @csrf
+                        @method('PATCH')
+
+                        <div>
+                            <label for="admin_member_name" class="pd-label">{{ __('Name') }}</label>
+                            <input id="admin_member_name" name="name" type="text" value="{{ old('name', $user->name) }}" class="pd-input mt-1 w-full text-sm" required autocomplete="off">
+                        </div>
+
+                        <div>
+                            <label for="admin_member_email" class="pd-label">{{ __('Login email') }}</label>
+                            <input id="admin_member_email" name="email" type="email" value="{{ old('email', $user->email) }}" class="pd-input mt-1 w-full text-sm" required autocomplete="off">
+                        </div>
+
+                        <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
+                            <div>
+                                <label for="admin_member_password" class="pd-label">{{ __('New password') }}</label>
+                                <input id="admin_member_password" name="password" type="password" class="pd-input mt-1 w-full text-sm" minlength="10" autocomplete="new-password" placeholder="{{ __('Leave blank to keep current') }}">
+                            </div>
+                            <div>
+                                <label for="admin_member_password_confirmation" class="pd-label">{{ __('Confirm password') }}</label>
+                                <input id="admin_member_password_confirmation" name="password_confirmation" type="password" class="pd-input mt-1 w-full text-sm" minlength="10" autocomplete="new-password">
+                            </div>
+                        </div>
+
+                        <button type="submit" class="w-full rounded-xl border border-boss-gold/20 bg-boss-gold/[0.08] px-4 py-2.5 text-sm font-semibold text-boss-gold transition hover:bg-boss-gold/[0.14]">
+                            {{ __('Save login details') }}
+                        </button>
+                        <p class="text-center text-[0.68rem] leading-relaxed text-boss-ivory/30">
+                            {{ __('Use this if the member cannot receive password reset emails. Changing email or password signs out old sessions.') }}
+                        </p>
+                    </form>
+
+                    <form action="{{ route('admin.models.password.generate', $user) }}" method="POST" class="mt-3 border-t border-white/[0.06] pt-3">
+                        @csrf
+                        <button type="submit" class="w-full rounded-xl border border-white/[0.08] bg-white/[0.04] px-4 py-2.5 text-sm font-medium text-boss-ivory/70 transition hover:bg-white/[0.07] hover:text-boss-ivory">
+                            {{ __('Generate temporary password') }}
+                        </button>
                     </form>
                 </section>
 
@@ -764,5 +875,56 @@
             </section>
         @endif
 
+        <x-modal name="confirm-onboarding-member-deletion" maxWidth="lg" focusable>
+            <form
+                method="POST"
+                action="{{ route('admin.models.destroy', $user) }}"
+                class="overflow-hidden"
+                x-data="{ submitting: false }"
+                @submit="submitting = true"
+            >
+                @csrf
+                @method('DELETE')
+                <input type="hidden" name="confirm_member_delete" value="1">
+
+                <div class="border-b border-white/[0.06] p-5 sm:p-6">
+                    <p class="text-[0.64rem] uppercase tracking-[0.18em] text-red-200/70">{{ __('Permanent Action') }}</p>
+                    <h2 class="mt-2 font-display text-2xl text-boss-ivory">{{ __('Delete member account?') }}</h2>
+                    <p class="mt-2 text-sm leading-6 text-boss-ivory/50">
+                        {{ __('This will permanently remove the member login, profile, course progress, uploaded verification files, course proof files, and linked application.') }}
+                    </p>
+                </div>
+
+                <div class="space-y-4 p-5 sm:p-6">
+                    <div class="rounded-xl border border-red-300/15 bg-red-400/10 px-4 py-3">
+                        <p class="text-[0.65rem] uppercase tracking-[0.16em] text-red-200/60">{{ __('Member') }}</p>
+                        <p class="mt-1 font-semibold text-red-100">{{ $user->name }}</p>
+                        <p class="mt-0.5 text-xs text-red-100/55">{{ $user->email }}</p>
+                    </div>
+
+                    <div class="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                        <button
+                            type="button"
+                            class="pd-btn-secondary h-11 justify-center"
+                            :disabled="submitting"
+                            @click="$dispatch('close')"
+                        >
+                            {{ __('Cancel') }}
+                        </button>
+                        <button
+                            type="submit"
+                            class="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-red-300/20 bg-red-400/15 px-5 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-red-100 transition hover:border-red-300/35 hover:bg-red-400/25 disabled:cursor-wait disabled:opacity-60"
+                            :disabled="submitting"
+                        >
+                            <svg x-show="submitting" x-cloak class="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                                <circle class="opacity-25" cx="12" cy="12" r="9" stroke="currentColor" stroke-width="3"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M21 12a9 9 0 0 1-9 9v-3a6 6 0 0 0 6-6h3Z"></path>
+                            </svg>
+                            <span x-text="submitting ? '{{ __('Deleting') }}' : '{{ __('Delete member') }}'">{{ __('Delete member') }}</span>
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </x-modal>
     </div>
 </x-admin-layout>

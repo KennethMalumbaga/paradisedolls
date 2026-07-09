@@ -251,7 +251,7 @@
                             @endif
 
                             {{-- Status badge overlay --}}
-                            <div class="absolute left-4 top-4 flex items-center gap-2">
+                            <div class="pointer-events-none absolute left-4 top-4 z-20 flex items-center gap-2">
                                 <span class="pd-course-card-platform-badge rounded-full border px-2.5 py-0.5 text-[0.6rem] font-medium backdrop-blur-sm" style="background: {{ $bg }}; color: {{ $color }}; border-color: {{ $color }}22;">
                                     {{ $course->displayPlatform() }}
                                 </span>
@@ -267,7 +267,7 @@
                             </div>
 
                             {{-- Lesson count badge --}}
-                            <div class="absolute right-4 top-4">
+                            <div class="pointer-events-none absolute right-4 top-4 z-20">
                                 <span class="pd-course-card-lesson-badge rounded-full border border-white/[0.08] bg-black/40 px-2.5 py-0.5 text-[0.6rem] text-boss-ivory/45 backdrop-blur-sm">
                                     {{ $course->lessons_count }} {{ __('lessons') }}
                                 </span>

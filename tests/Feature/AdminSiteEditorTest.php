@@ -14,6 +14,14 @@ class AdminSiteEditorTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_our_story_mission_mentions_kayla_and_her_team_guiding_members(): void
+    {
+        $this->get(route('our-story'))
+            ->assertOk()
+            ->assertSeeText('With me and my team guiding you')
+            ->assertDontSeeText('With me guiding you');
+    }
+
     public function test_admin_can_open_main_site_editor(): void
     {
         $admin = User::factory()->create(['role' => 'admin']);
@@ -62,6 +70,24 @@ class AdminSiteEditorTest extends TestCase
             ->assertOk()
             ->assertSee('Kayla can edit this headline')
             ->assertSee('First editable paragraph.');
+    }
+
+    public function test_public_footer_has_social_media_links(): void
+    {
+        $this->get(route('home'))
+            ->assertOk()
+            ->assertSee('https://www.tiktok.com/@paradisedollsstreaming', false)
+            ->assertSee('https://snapchat.com/t/XDWG3Kkz', false)
+            ->assertSee('https://www.instagram.com/barbiebossdoll/', false)
+            ->assertSee('https://api.whatsapp.com/send?phone=447346924436', false)
+            ->assertSee('https://t.me/paradisedolls26', false)
+            ->assertSee('https://www.facebook.com/share/19BBXuqjvS/?mibextid=wwXIfr', false)
+            ->assertSee('Open TikTok')
+            ->assertSee('Open Snapchat')
+            ->assertSee('Open Instagram')
+            ->assertSee('Open WhatsApp')
+            ->assertSee('Open Telegram')
+            ->assertSee('Open Facebook');
     }
 
     public function test_admin_can_upload_marketing_image(): void

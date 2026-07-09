@@ -7,6 +7,7 @@ use App\Models\ModelApplication;
 use App\Models\ModelProfile;
 use App\Models\User;
 use App\Support\DesignedXlsxWorkbook;
+use App\Support\OnboardingFormDefinition;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class AdminCrmExportController extends Controller
@@ -318,6 +319,7 @@ class AdminCrmExportController extends Controller
                 'Private Space',
                 'Payout Methods',
                 'Equipment',
+                'Custom Answers',
             ], self::STYLE_TABLE_HEADER), 22),
         ];
 
@@ -337,6 +339,7 @@ class AdminCrmExportController extends Controller
                 $this->checkIcon($profile?->has_private_space === 'Yes'),
                 $this->payoutSummary($profile),
                 $this->listValue($profile?->equipment),
+                $this->customAnswersSummary($profile),
             ], [
                 self::STYLE_CENTER,
                 self::STYLE_ACCENT_LABEL,
@@ -351,15 +354,16 @@ class AdminCrmExportController extends Controller
                 $profile?->has_private_space === 'Yes' ? self::STYLE_GOOD : self::STYLE_WARNING,
                 self::STYLE_WRAP,
                 self::STYLE_WRAP,
+                self::STYLE_WRAP,
             ]), 30);
         }
 
         return [
             'name' => "\u{1F4BC} Work Preferences",
             'freezeRow' => 3,
-            'columns' => [4, 20, 14, 42, 24, 26, 15, 13, 13, 14, 16, 26, 24],
+            'columns' => [4, 20, 14, 42, 24, 26, 15, 13, 13, 14, 16, 26, 24, 36],
             'rows' => $rows,
-            'merges' => ['A1:M1', 'A2:M2'],
+            'merges' => ['A1:N1', 'A2:N2'],
         ];
     }
 
@@ -497,11 +501,27 @@ class AdminCrmExportController extends Controller
             $this->addProfileField($rows, $merges, $row, $field[0], $field[1]);
         }
 
+        $customAnswers = $this->customAnswersForProfile($profile);
+        if ($customAnswers !== []) {
+            $row++;
+            $this->addProfileSection($rows, $merges, $row, "\u{1F4DD}  CUSTOM ONBOARDING ANSWERS");
+
+            foreach ($customAnswers as $answer) {
+                $label = $answer['label'].($answer['archived'] ? ' (Archived)' : '');
+                $this->addProfileField($rows, $merges, $row, $label, $answer['answer']);
+            }
+        }
+
         $row++;
         $this->addProfileSection($rows, $merges, $row, "\u{1F4B3}  PAYOUT INFORMATION");
         foreach ([
             ['Payout Methods', $this->payoutSummary($profile)],
             ['Payout Country', $profile->payout_country],
+            ['Name on Account', $profile->payout_account_name],
+            ['Name of Bank', $profile->payout_bank_name],
+            ['Sort Code', $profile->payout_sort_code],
+            ['Account Number', $profile->payout_account_number],
+            ['IBAN', $profile->payout_iban],
         ] as $field) {
             $this->addProfileField($rows, $merges, $row, $field[0], $field[1]);
         }
@@ -760,8 +780,15 @@ class AdminCrmExportController extends Controller
             'Payout Methods',
             'Payout Method Other',
             'Payout Country',
+            'Name on Account',
+            'Name of Bank',
+            'Sort Code',
+            'Account Number',
+            'IBAN',
             'Model Vibe',
             'Anything Else',
+            'Custom Onboarding Answers',
+            'Onboarding Form Version',
             'Equipment',
             'Availability',
             'Goals',
@@ -834,8 +861,15 @@ class AdminCrmExportController extends Controller
             $this->listValue($profile?->payout_methods),
             $profile?->payout_method_other,
             $profile?->payout_country,
+            $profile?->payout_account_name,
+            $profile?->payout_bank_name,
+            $profile?->payout_sort_code,
+            $profile?->payout_account_number,
+            $profile?->payout_iban,
             $profile?->model_vibe,
             $profile?->anything_else,
+            $this->customAnswersSummary($profile),
+            $profile?->onboarding_form_version,
             $this->listValue($profile?->equipment),
             $profile?->availability,
             $profile?->goals,
@@ -863,6 +897,31 @@ class AdminCrmExportController extends Controller
             $profile?->application?->id,
             $profile?->application?->status,
         ];
+    }
+
+    private function customAnswersSummary(?ModelProfile $profile): string
+    {
+        $answers = $this->customAnswersForProfile($profile);
+
+        if ($answers === []) {
+            return '';
+        }
+
+        return collect($answers)
+            ->map(fn (array $answer): string => $answer['label'].': '.$answer['answer'].($answer['archived'] ? ' (archived field)' : ''))
+            ->implode("\n");
+    }
+
+    private function customAnswersForProfile(?ModelProfile $profile): array
+    {
+        if (! $profile || empty($profile->custom_onboarding_answers)) {
+            return [];
+        }
+
+        return OnboardingFormDefinition::customAnswersForDisplay(
+            OnboardingFormDefinition::get(),
+            $profile->custom_onboarding_answers ?? []
+        );
     }
 
     private function xlsxDownload(string $filename, DesignedXlsxWorkbook $workbook): StreamedResponse

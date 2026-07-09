@@ -2,9 +2,11 @@
 
 namespace Tests\Feature;
 
+use App\Mail\AdminActivityAlertMail;
 use App\Models\Testimonial;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
@@ -41,6 +43,7 @@ class TestimonialManagementTest extends TestCase
 
     public function test_model_submitted_testimonial_needs_admin_approval_before_public_display(): void
     {
+        Mail::fake();
         Storage::fake('public');
         Storage::disk('public')->put('profile-photos/model.jpg', 'avatar');
 
@@ -72,6 +75,14 @@ class TestimonialManagementTest extends TestCase
         $this->assertNull($testimonial->approved_at);
         $this->assertNull($testimonial->image_path);
 
+        $notification = $admin->notifications()->first();
+        $this->assertNotNull($notification);
+        $this->assertSame('testimonial_submitted', $notification->data['category']);
+        Mail::assertQueued(AdminActivityAlertMail::class, fn (AdminActivityAlertMail $mail) =>
+            $mail->subjectLine === 'New testimonial awaiting review from '.$model->name
+            && $mail->actionLabel === 'Review testimonial'
+        );
+
         $this->get(route('home'))
             ->assertOk()
             ->assertDontSee('Training and support helped me feel ready.');
@@ -79,6 +90,7 @@ class TestimonialManagementTest extends TestCase
         $this->actingAs($admin)->get(route('admin.testimonials.index'))
             ->assertOk()
             ->assertSee('Training and support helped me feel ready.')
+            ->assertSee(route('profile-photos.show', $model, absolute: false), false)
             ->assertSee('Approve');
 
         $this->actingAs($admin)->post(route('admin.testimonials.approve', $testimonial))
@@ -95,7 +107,7 @@ class TestimonialManagementTest extends TestCase
             ->assertSee('Training and support helped me feel ready.')
             ->assertSee('#Confidence')
             ->assertSee('@neljhanredondo')
-            ->assertSee('profile-photos/model.jpg');
+            ->assertSee(route('profile-photos.show', $model, absolute: false), false);
     }
 
     public function test_homepage_only_shows_approved_success_stories(): void
@@ -118,5 +130,26 @@ class TestimonialManagementTest extends TestCase
             ->assertOk()
             ->assertSee('A published testimonial.')
             ->assertDontSee('A draft testimonial.');
+    }
+
+    public function test_homepage_does_not_show_placeholder_reviews_when_there_are_no_real_stories(): void
+    {
+        $this->get(route('home'))
+            ->assertOk()
+            ->assertDontSee('New Member')
+            ->assertDontSee('@newmember')
+            ->assertDontSee('#SupportSystem');
+    }
+
+    public function test_success_stories_hero_uses_the_community_copy(): void
+    {
+        $this->get(route('success-stories'))
+            ->assertOk()
+            ->assertSeeText('PARADISE DOLLS COMMUNITY')
+            ->assertSeeText('Real Stories from Our Paradise Dolls')
+            ->assertSeeText('Behind every success is a woman who had the courage to take the first step.')
+            ->assertSeeText('Every Paradise Doll’s journey is unique')
+            ->assertSeeText('success is about more than reaching your goals')
+            ->assertSeeText('Your story starts with a single step');
     }
 }
